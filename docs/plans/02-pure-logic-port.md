@@ -58,7 +58,7 @@
 
 ## 完了条件
 
-- `npm test` で移植した全テストが green。
+- `pnpm test` で移植した全テストが green。
 - 特に diff-anchor（アンカー解決全ケース）・process-findings（決定論性・グルーピング）が通る。
 - collect-context は git/gh 依存部分をこのリポジトリの実 diff で手動確認（`node -e` かデバッグスクリプト）。
 

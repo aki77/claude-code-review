@@ -17,7 +17,7 @@ TypeScript + ESM + vitest のプロジェクト骨格を用意し、`node dist/c
   - `dev`: `tsx src/cli.ts`
   - `test`: `vitest run`
   - `test:watch`: `vitest`
-- `bin`: `{ "code-review": "dist/cli.js" }`（将来 npm 経由で使えるように。当面はローカル実行）。
+- `bin`: `{ "code-review": "dist/cli.js" }`（将来 npm/pnpm 等の CLI として使えるように。当面はローカル実行）。
 
 ### `tsconfig.json`
 - `"module": "nodenext"`, `"moduleResolution": "nodenext"`, `"target": "es2022"`。
@@ -48,11 +48,12 @@ tests/              # vitest（Phase 2 で移植）
 
 ## 完了条件
 
-- `npm install` が通る。
-- `npm run dev -- --help` でサブコマンド一覧が出る。
-- `npm test` が「テストなし」で正常終了する（Phase 2 でテスト追加）。
+- `pnpm install` が通る。
+- `pnpm dev -- --help` でサブコマンド一覧が出る。
+- `pnpm test` が「テストなし」で正常終了する（Phase 2 でテスト追加）。
 
 ## 注意
 
-- Node バージョンは v24 系（確認済み: v24.18.0）。`package.json` の `engines` に `">=20"` 程度を明記。
-- `@anthropic-ai/claude-agent-sdk` のバージョンは install 時点の最新に固定（`package-lock.json` をコミット）。
+- Node バージョンは v24 系（確認済み: v24.18.0）。`package.json` の `engines` に `">=24"` を明記。
+- `@anthropic-ai/claude-agent-sdk` のバージョンは install 時点の最新に固定（`pnpm-lock.yaml` をコミット）。
+- `@types/node` の版は Node 本体の版と一致しない（例: `^24.18.0` は存在せず `^24.1.0` が正）。依存追加時は npm 上の実在バージョンを確認すること。

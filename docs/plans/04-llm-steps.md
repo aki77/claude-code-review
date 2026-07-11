@@ -73,7 +73,7 @@ printSummary(finalDoc, ctx)   // step8
 ## 検証（E2E）
 
 1. このリポジトリで staged 変更を作る（適当なファイル追加/編集を `git add`）。
-2. `npm run build && node dist/cli.js local --debug` を実行。
+2. `pnpm build && node dist/cli.js local --debug` を実行。
 3. 確認:
    - 全ステップが例外なく完走。
    - 中間ログで findings→groups→issues→final の変換が妥当。
