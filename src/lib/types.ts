@@ -193,3 +193,39 @@ export interface FinalDoc {
   unverified: string[];
   stats: FinalStats;
 }
+
+// ---- collect-context 関連 ---------------------------------------------------
+
+export type Tier = "tiny" | "small" | "normal";
+export type ContextSource = "pr" | "range" | "staged";
+
+export interface Metrics {
+  totalFiles: number;
+  totalAdded: number;
+  totalDeleted: number;
+  totalChangedLines: number;
+}
+
+/** buildAssignments の1バケット。files はソート済み。 */
+export interface Assignment {
+  files: Array<{ path: string; rules: string[] }>;
+}
+
+export interface Context {
+  source: ContextSource;
+  changedFiles: string[];
+  excludedFiles: string[];
+  oversizedFiles: string[];
+  excludeArgs: { git: string[] };
+  assignments: Assignment[];
+  metrics: Metrics;
+  tier: Tier;
+  diffArgs: string[];
+  range?: string;
+}
+
+/** collectRules / rulesForFile が扱うルール定義。paths=null は全ファイル適用。 */
+export interface Rule {
+  path: string;
+  paths: string[] | null;
+}

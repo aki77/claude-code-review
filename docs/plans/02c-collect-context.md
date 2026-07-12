@@ -4,6 +4,15 @@
 git/gh 副作用を多数含む。**元 `.mjs` は関数を export していない**ため、切り出して
 export 化しながら移植する。02a の `exec.ts` に依存するため 02a 完了後に着手。
 
+移植元の `execFileSync`（同期・非 0 で throw・stdout 文字列を返す）に対し、本リポジトリの
+`exec.ts` は `execFileAsync`（非同期・throw せず `{stdout,stderr,code}` を返す）に統一済み。
+そのため collect-context 配下の全関数を async 化し、元の `try/catch` による制御フローは
+すべて `code !== 0` チェックへ書き換える（`resolvePrBaseRange` の base 不在/shallow 判定、
+`resolveRange` の 4 段フォールバックなど）。外部から見た挙動（エラーメッセージ・throw
+するかどうか）は不変。特に `resolveRange` は元 CLI では全段失敗時に `process.exit(1)` して
+いたが、本移植ではライブラリ関数化のため `throw` に変更する（`exit` は呼び出し側 cli.ts の
+責務とする）。
+
 型の置き場所: 新規型（`Context` 等）も 02a と同方針で `src/lib/types.ts` に集約し、
 `collect-context.ts` はそこから import する。
 
@@ -44,7 +53,9 @@ NUL 区切り文字列を stdin 供給する必要があるが、02a 時点の `
 - env しきい値上書き（`num()` で Number.isFinite チェック）:
   `CODE_REVIEW_TINY_MAX_FILES`(2)/`_TINY_MAX_LINES`(50)/`_SMALL_MAX_FILES`(5)/
   `_SMALL_MAX_LINES`(150)/`_OVERSIZED_MAX_LINES`(1000)。
-- その他内部: parseArgs, resolveRange（4 段自動解決）, getChangedFilesFromRange, getStagedFiles,
+- その他内部: parseArgs, resolveRange（4 段自動解決。各段は `code===0 && stdout.trim()` で
+  確定、それ以外は次段へフォールスルー。全段失敗時は `process.exit` ではなく `throw`
+  ＝ライブラリ関数化）, getChangedFilesFromRange, getStagedFiles,
   parseNumstat, listRuleFiles, fileMatchesPatterns, detectLinguistExcluded, buildExcludeArgs,
   collectRules, rulesForFile。
 - git/gh は `src/lib/exec.ts` の `execFile` ラッパ経由。

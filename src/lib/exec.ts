@@ -14,13 +14,14 @@ export interface ExecResult {
 export function execFileAsync(
   command: string,
   args: string[],
-  options: { cwd?: string; maxBuffer?: number } = {},
+  options: { cwd?: string; maxBuffer?: number; input?: string } = {},
 ): Promise<ExecResult> {
+  const { input, ...execOptions } = options;
   return new Promise((resolve) => {
-    execFile(
+    const child = execFile(
       command,
       args,
-      { encoding: "utf8", ...options },
+      { encoding: "utf8", ...execOptions },
       (error, stdout, stderr) => {
         if (error) {
           const code =
@@ -35,5 +36,10 @@ export function execFileAsync(
         resolve({ stdout, stderr, code: 0 });
       },
     );
+    // 子プロセスが stdin を読まずに早期終了すると write 側で EPIPE が発生しうる。
+    // 同期版 execFileSync({ input }) が内部で握っていた挙動を再現し、
+    // プロセス全体が落ちないようにする。
+    child.stdin?.on("error", () => {});
+    if (input !== undefined) child.stdin?.end(input);
   });
 }
