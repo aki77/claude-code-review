@@ -20,7 +20,7 @@ pnpm format  # biome check --write（自動修正）
 ## 設計原則（最重要）
 
 - **LLM は意味判断のみ、位置解決・検証・フィルタ適用・構造転写はコードで行う**
-  （`src/cli.ts` 冒頭コメント、`docs/plans/00-overview.md` 由来）。新しいステップを
+  （`src/cli.ts` 冒頭コメント由来）。新しいステップを
   追加するときもこの分担を崩さない。
 - **行番号は LLM に推測させない**。LLM は diff 中の実在コード片 `existingCode` だけを
   出力し、行番号は `resolveAnchor`（`src/lib/diff-anchor.ts`）で機械的に確定する。
@@ -34,10 +34,9 @@ pnpm format  # biome check --write（自動修正）
 
 ## アーキテクチャ
 
-全体設計と各フェーズの計画は `docs/plans/00-overview.md` を起点に `docs/plans/*.md` を参照。
 パイプラインは `collectContext → LLM要約/クラスタ → 決定論処理 → LLMレビュー →
 processFindings → LLMマージ → mergeFindings → LLM検証 → applyVerdicts → 出力/投稿`
-の順（詳細は overview 内の表）。
+の順。
 
 - `src/cli.ts`: 引数パース・ディスパッチのみ。実装ロジックは書かない。
 - `src/lib/`: 決定論ロジック（git/gh 呼び出し、diff アンカー解決、finding 処理など）。

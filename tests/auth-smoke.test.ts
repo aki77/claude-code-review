@@ -5,7 +5,7 @@
 // ローカルでは `env -u ANTHROPIC_API_KEY RUN_LIVE=1 pnpm test tests/auth-smoke.test.ts`
 // を実行する（事前に claude CLI でログイン済みであること）。
 //
-// 検証観点（docs/plans/03-auth-smoke-test.md 原典 完了条件）:
+// 検証観点（完了条件）:
 // (1) 例外なく result が返る（OAuth 継承成功）
 // (2) JSON パース成功
 // (3) usage / total_cost_usd が取得できる

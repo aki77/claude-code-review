@@ -5,11 +5,11 @@
 // を起動し、CLI の OAuth ログイン状態を継承する。この前提の実機検証が
 // tests/auth-smoke.test.ts。
 //
-// 設計原則: LLM は意味判断のみ、パース・検証・リトライ制御はコード側（docs/plans/00-overview.md）。
+// 設計原則: LLM は意味判断のみ、パース・検証・リトライ制御はコード側。
 // 構造化出力は outputFormat: json_schema を第一選択とし、使えない/schema 未指定のときは
-// system prompt での JSON 強制 + パースにフォールバックする（docs/plans/03-auth-smoke-test.md）。
+// system prompt での JSON 強制 + パースにフォールバックする。
 // system prompt は claude_code プリセットを土台にし、JSON 強制指示を含むレビュー本文は
-// append で末尾に載せる（docs/plans/*-system-prompt-*.md）。
+// append で末尾に載せる。
 
 import type {
   ModelUsage,

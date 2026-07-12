@@ -1,6 +1,6 @@
 // LLM ステップ（step2/3/5/6）向けのプロンプトテンプレートと JSON Schema。
 //
-// 副作用なし・ファイル I/O なしの純関数のみを置く（docs/plans/04-llm-steps.md 準拠）。
+// 副作用なし・ファイル I/O なしの純関数のみを置く。
 // ツール禁止（runStructured は allowedTools: []）への対処として、rules 本文・REVIEW.md・
 // contextHints ファイルなど「埋め込み済み文字列」を受け取ってテンプレートへ差し込むだけに
 // 徹する。ファイルの読み込みは steps.ts が行う。

@@ -1,5 +1,5 @@
 // pipeline.ts の統合テスト。exec/query/readFile を全モック注入し、git を呼ばずに
-// E2E をユニット再現する（docs/plans/04-llm-steps.md のテスト方針）。
+// E2E をユニット再現する。
 import { describe, expect, it } from "vitest";
 import type { ExecResult } from "../src/lib/exec.ts";
 import { runLocalReview, runPrReview } from "../src/pipeline.ts";

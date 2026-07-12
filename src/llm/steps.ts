@@ -2,7 +2,7 @@
 //
 // 各関数は最終引数に deps?: {query?, readFile?, debug?} を取り、内部で
 // runStructured(opts, {query}) へ委譲する。usage/totalCostUsd は debug 時のみ合算する。
-// 設計原則（docs/plans/04-llm-steps.md）: LLM は意味判断のみ。位置解決・検証・フィルタ適用・
+// 設計原則: LLM は意味判断のみ。位置解決・検証・フィルタ適用・
 // 構造転写・グルーピング・並列制御はすべてコードで決定論的に行う（Promise.all で並列化）。
 import { readFileSync } from "node:fs";
 import type { ModelUsage } from "@anthropic-ai/claude-agent-sdk";
