@@ -10,8 +10,8 @@ import {
   parseNumstat,
   resolvePrBaseRange,
   splitOversized,
-} from "../src/lib/collect-context.js";
-import type { Rule } from "../src/lib/types.js";
+} from "../src/lib/collect-context.ts";
+import type { Rule } from "../src/lib/types.ts";
 
 describe("fileMatchesPatterns", () => {
   const matches = (file: string, pattern: string) => fileMatchesPatterns(file, [pattern]);

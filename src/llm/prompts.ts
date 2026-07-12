@@ -4,7 +4,7 @@
 // ツール禁止（runStructured は allowedTools: []）への対処として、rules 本文・REVIEW.md・
 // contextHints ファイルなど「埋め込み済み文字列」を受け取ってテンプレートへ差し込むだけに
 // 徹する。ファイルの読み込みは steps.ts が行う。
-import type { Cluster, JSONSchema } from "../lib/types.js";
+import type { Cluster, JSONSchema } from "../lib/types.ts";
 
 // ---- モデルエイリアス定数 ----------------------------------------------------
 // runStructured の model はそのまま SDK query() → claude CLI へ渡る（client.ts）。

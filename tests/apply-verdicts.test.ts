@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { applyVerdicts } from "../src/lib/apply-verdicts.js";
-import type { IssuesDoc } from "../src/lib/types.js";
+import { applyVerdicts } from "../src/lib/apply-verdicts.ts";
+import type { IssuesDoc } from "../src/lib/types.ts";
 
 const doc: IssuesDoc = {
   issues: [

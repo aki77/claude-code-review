@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { formatSummary } from "../src/report.js";
-import type { Context, FinalDoc, Issue } from "../src/lib/types.js";
+import { formatSummary } from "../src/report.ts";
+import type { Context, FinalDoc, Issue } from "../src/lib/types.ts";
 
 function baseCtx(overrides: Partial<Context> = {}): Context {
   return {

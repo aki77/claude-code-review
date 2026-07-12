@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { mergeFindings } from "../src/lib/merge-findings.js";
-import type { FindingsDoc } from "../src/lib/types.js";
+import { mergeFindings } from "../src/lib/merge-findings.ts";
+import type { FindingsDoc } from "../src/lib/types.ts";
 
 const doc: FindingsDoc = {
   findings: [

@@ -10,7 +10,7 @@
 // system prompt での JSON 強制 + パースにフォールバックする（docs/plans/03-auth-smoke-test.md）。
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { NonNullableUsage } from "@anthropic-ai/claude-agent-sdk";
-import type { JSONSchema } from "../lib/types.js";
+import type { JSONSchema } from "../lib/types.ts";
 
 export interface RunStructuredOpts {
   system: string;

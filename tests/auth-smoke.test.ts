@@ -10,7 +10,7 @@
 // (2) JSON パース成功
 // (3) usage / total_cost_usd が取得できる
 import { describe, expect, it } from "vitest";
-import { runStructured } from "../src/llm/client.js";
+import { runStructured } from "../src/llm/client.ts";
 
 // ANTHROPIC_API_KEY unset のまま動くことが前提のため、テスト内で明示的に固定する。
 delete process.env.ANTHROPIC_API_KEY;

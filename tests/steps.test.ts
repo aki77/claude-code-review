@@ -4,9 +4,9 @@ import {
   llmReviewAgents,
   llmSummaryAndClusters,
   llmVerifyIssues,
-} from "../src/llm/steps.js";
-import { makeFakeQuery, makeThrowingQuery } from "./helpers/fake-query.js";
-import type { Context, FindingsDoc, Issue } from "../src/lib/types.js";
+} from "../src/llm/steps.ts";
+import { makeFakeQuery, makeThrowingQuery } from "./helpers/fake-query.ts";
+import type { Context, FindingsDoc, Issue } from "../src/lib/types.ts";
 
 function baseCtx(overrides: Partial<Context> = {}): Context {
   return {

@@ -15,7 +15,7 @@
 //
 // main()（CLI 化・git execFileSync・artifact I/O）は移植しない（Phase 4）。
 // 純関数部分のみ移植し、git 取得は diffText 引数注入に置換。
-import { lineRange, parseDiff, resolveAnchor, splitAndNormalize } from "./diff-anchor.js";
+import { lineRange, parseDiff, resolveAnchor, splitAndNormalize } from "./diff-anchor.ts";
 import type {
   Category,
   Ctx,
@@ -25,7 +25,7 @@ import type {
   Group,
   Params,
   Severity,
-} from "./types.js";
+} from "./types.ts";
 
 // ---- スキーマ検証 ------------------------------------------------------------
 // finding 1 件のスキーマを検証し、違反理由の配列を返す（空なら valid）。

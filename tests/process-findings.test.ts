@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { processFindings } from "../src/lib/process-findings.js";
-import type { Ctx, Finding, FindingsDoc } from "../src/lib/types.js";
+import { processFindings } from "../src/lib/process-findings.ts";
+import type { Ctx, Finding, FindingsDoc } from "../src/lib/types.ts";
 
 const ctx: Ctx = {
   changedFiles: ["src/a.js", "src/b.js"],

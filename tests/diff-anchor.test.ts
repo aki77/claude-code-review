@@ -5,7 +5,7 @@ import {
   parseDiff,
   resolveAnchor,
   sideLines,
-} from "../src/lib/diff-anchor.js";
+} from "../src/lib/diff-anchor.ts";
 
 // 新規ファイル diff（全行 added、new 側 1..N に対応）を組み立てるヘルパ。
 const path = "src/sample.js";

@@ -12,7 +12,7 @@
 // フェンスを書かせず「置換後の行だけ」を渡させ、この関数が FINAL の existingCode（＝範囲の
 // 逐語テキスト）と突き合わせて「意図しない行削除」を機械検出する。検出したら suggestion を捨てて
 // 文章コメントのみ投稿する（コードは絶対に消さない・レビュー全体は止めない）。
-import { lineRange, splitAndNormalize } from "./diff-anchor.js";
+import { lineRange, splitAndNormalize } from "./diff-anchor.ts";
 import type {
   FinalDoc,
   Issue,
@@ -20,7 +20,7 @@ import type {
   PostReviewInput,
   RestComment,
   ReviewPayload,
-} from "./types.js";
+} from "./types.ts";
 
 // params を GitHub REST の snake_case へ変換する。単一行は line+side のみ、
 // 複数行は start_line/start_side も含める。subjectType は落とす。

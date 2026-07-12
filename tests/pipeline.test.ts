@@ -1,8 +1,8 @@
 // pipeline.ts の統合テスト。exec/query/readFile を全モック注入し、git を呼ばずに
 // E2E をユニット再現する（docs/plans/04-llm-steps.md のテスト方針）。
 import { describe, expect, it } from "vitest";
-import { runLocalReview } from "../src/pipeline.js";
-import type { ExecResult } from "../src/lib/exec.js";
+import { runLocalReview } from "../src/pipeline.ts";
+import type { ExecResult } from "../src/lib/exec.ts";
 
 const DIFF_TEXT = `diff --git a/a.ts b/a.ts
 index 0000000..1111111 100644

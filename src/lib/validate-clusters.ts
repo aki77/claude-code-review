@@ -5,7 +5,7 @@
 // 設計方針（ユーザー決定済み）: クラスタ分割は LLM 維持 + スクリプト検証。検証・修復が
 // 破綻したら「全変更ファイルを単一クラスタとみなす」決定論的縮退へ一本化する。**サマリ
 // エージェントが失敗した場合も stdin `[]` でこのスクリプトを通し、縮退経路をここに集約する。**
-import type { Cluster, ClustersDoc } from "./types.js";
+import type { Cluster, ClustersDoc } from "./types.ts";
 
 export const MAX_CLUSTERS = 3;
 

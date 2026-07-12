@@ -5,7 +5,7 @@
 // 設計原則（docs/plans/04-llm-steps.md）: LLM は意味判断のみ。位置解決・検証・フィルタ適用・
 // 構造転写・グルーピング・並列制御はすべてコードで決定論的に行う（Promise.all で並列化）。
 import { readFileSync } from "node:fs";
-import { runStructured, type QueryFn } from "./client.js";
+import { runStructured, type QueryFn } from "./client.ts";
 import {
   bugAgentSystem,
   bugAgentUser,
@@ -28,8 +28,8 @@ import {
   verifySystem,
   verifyUser,
   VERDICT_SCHEMA,
-} from "./prompts.js";
-import type { Assignment, Cluster, Context, FindingsDoc, Issue, MergeText, Verdict } from "../lib/types.js";
+} from "./prompts.ts";
+import type { Assignment, Cluster, Context, FindingsDoc, Issue, MergeText, Verdict } from "../lib/types.ts";
 
 export type DebugSink = (label: string, obj: unknown) => void;
 

@@ -21,7 +21,7 @@ import {
   VERDICT_SCHEMA,
   verifySystem,
   verifyUser,
-} from "../src/llm/prompts.js";
+} from "../src/llm/prompts.ts";
 
 describe("モデルエイリアス定数", () => {
   it("MODEL_LIGHT は sonnet、MODEL_HEAVY は opus", () => {

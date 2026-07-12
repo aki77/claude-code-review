@@ -11,8 +11,8 @@
  * 実装ロジック（git/gh 呼び出し・LLM・レビュー処理）はここには書かない
  * （src/pipeline.ts / src/report.ts に委譲する）。
  */
-import { runLocalReview } from "./pipeline.js";
-import { printSummary } from "./report.js";
+import { runLocalReview } from "./pipeline.ts";
+import { printSummary } from "./report.ts";
 
 type Command = "local" | "pr";
 

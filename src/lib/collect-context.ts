@@ -11,8 +11,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { glob } from "node:fs/promises";
 import path from "node:path";
-import { execFileAsync } from "./exec.js";
-import type { Assignment, Context, ContextSource, Rule, Tier } from "./types.js";
+import { execFileAsync } from "./exec.ts";
+import type { Assignment, Context, ContextSource, Rule, Tier } from "./types.ts";
 
 type Exec = typeof execFileAsync;
 

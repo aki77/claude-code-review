@@ -7,7 +7,7 @@
 // ruleRefs（和集合）は**すべてスクリプトが機械転写**し、LLM を経由させない（転記ミス防止）。
 // category/severity は process-findings のグループ集約規則で確定済みの値をそのままコピーする
 // （kind と同じ扱い。LLM の統合文章 title/body とは独立）。
-import type { FindingsDoc, Issue, IssuesDoc, MergeText } from "./types.js";
+import type { FindingsDoc, Issue, IssuesDoc, MergeText } from "./types.ts";
 
 // findingsDoc（FINDINGS の中身）と mergeTexts（LLM 統合文章配列）から ISSUES を組み立てる純粋関数。
 export function mergeFindings(findingsDoc: FindingsDoc, mergeTexts: unknown): IssuesDoc {

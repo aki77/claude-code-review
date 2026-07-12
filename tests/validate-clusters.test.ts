@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_CLUSTERS, tierReducedClusters, validateClusters } from "../src/lib/validate-clusters.js";
+import { MAX_CLUSTERS, tierReducedClusters, validateClusters } from "../src/lib/validate-clusters.ts";
 
 const changed = ["a.js", "b.js", "c.js", "d.js"];
 

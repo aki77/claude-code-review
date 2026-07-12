@@ -9,7 +9,7 @@
 //
 // このモジュールは複数スクリプト（process-findings.ts 等）から import される純粋ロジック
 // で、FS/ネットワークには依存しない（diff テキストと課題オブジェクトを受け取るだけ）。
-import type { AnchorResult, Ctx, FilesByPath, Params, Side } from "./types.js";
+import type { AnchorResult, Ctx, FilesByPath, Params, Side } from "./types.ts";
 
 // ---- diff hunk パース --------------------------------------------------------
 // unified diff の hunk ヘッダ。`@@ -oldStart,oldCount +newStart,newCount @@`

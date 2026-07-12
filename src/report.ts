@@ -2,7 +2,7 @@
 //
 // review-core.md:197-203 準拠（投稿なし）。local-review なので冒頭の「変更概要」は
 // 載せない（local-review SKILL.md:29）。
-import type { Context, FinalDoc } from "./lib/types.js";
+import type { Context, FinalDoc } from "./lib/types.ts";
 
 function issueLine(issue: FinalDoc["issues"][number]): string {
   const badge = `[${issue.category ?? "-"} · ${issue.severity ?? "-"}]`;

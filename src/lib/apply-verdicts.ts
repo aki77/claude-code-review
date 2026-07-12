@@ -9,7 +9,7 @@
 //
 // confirmed の issue は merge-findings.ts が転写した category/severity をそのまま保持する
 // （このモジュールは issue を丸ごと保持するため、コード変更なしで FINAL まで自動的に携行される）。
-import type { FinalDoc, Issue, IssuesDoc, RejectedIssue, Verdict, VerdictKind } from "./types.js";
+import type { FinalDoc, Issue, IssuesDoc, RejectedIssue, Verdict, VerdictKind } from "./types.ts";
 
 export const VALID_VERDICTS = new Set<VerdictKind>(["confirmed", "rejected"]);
 

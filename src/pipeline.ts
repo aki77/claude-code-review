@@ -5,15 +5,15 @@
 //   clusters 確定（validateClusters / tierReducedClusters）→ llmReviewAgents →
 //   processFindings → [step4b スキップ] → llmMergeTexts → mergeFindings →
 //   llmVerifyIssues → applyVerdicts → 呼び出し側が出力
-import { applyVerdicts } from "./lib/apply-verdicts.js";
-import { collectContext, type CollectContextOpts } from "./lib/collect-context.js";
-import { buildDiffArgs } from "./lib/diff-anchor.js";
-import { execFileAsync } from "./lib/exec.js";
-import { mergeFindings } from "./lib/merge-findings.js";
-import { processFindings } from "./lib/process-findings.js";
-import type { Context, FinalDoc } from "./lib/types.js";
-import { tierReducedClusters, validateClusters } from "./lib/validate-clusters.js";
-import type { QueryFn } from "./llm/client.js";
+import { applyVerdicts } from "./lib/apply-verdicts.ts";
+import { collectContext, type CollectContextOpts } from "./lib/collect-context.ts";
+import { buildDiffArgs } from "./lib/diff-anchor.ts";
+import { execFileAsync } from "./lib/exec.ts";
+import { mergeFindings } from "./lib/merge-findings.ts";
+import { processFindings } from "./lib/process-findings.ts";
+import type { Context, FinalDoc } from "./lib/types.ts";
+import { tierReducedClusters, validateClusters } from "./lib/validate-clusters.ts";
+import type { QueryFn } from "./llm/client.ts";
 import {
   defaultReadFile,
   llmMergeTexts,
@@ -21,7 +21,7 @@ import {
   llmSummaryAndClusters,
   llmVerifyIssues,
   type DebugSink,
-} from "./llm/steps.js";
+} from "./llm/steps.ts";
 
 type Exec = typeof execFileAsync;
 

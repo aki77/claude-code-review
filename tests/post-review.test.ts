@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildPayload, buildSuggestionBody } from "../src/lib/post-review.js";
-import type { FinalDoc, Issue } from "../src/lib/types.js";
+import { buildPayload, buildSuggestionBody } from "../src/lib/post-review.ts";
+import type { FinalDoc, Issue } from "../src/lib/types.ts";
 
 // テストで変化しない共通フィールドを既定値にし、各ケースは差分（id/path/existingCode/
 // resolved/params/sourceFindingIds 等）だけ渡せばよいようにするビルダー。

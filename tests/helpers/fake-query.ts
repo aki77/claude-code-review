@@ -3,7 +3,7 @@
 // runStructured は query() の async generator から `{type:"result", subtype:"success", ...}`
 // の1メッセージを待つ（client.ts の result 経路）。このヘルパーはその1メッセージだけを
 // yield するフェイクを作り、実際の LLM を呼ばずに runStructured を実際に通す。
-import type { QueryFn } from "../../src/llm/client.js";
+import type { QueryFn } from "../../src/llm/client.ts";
 
 type QueryCall = { prompt: unknown; options: unknown };
 
