@@ -263,3 +263,8 @@ export interface ReviewPayload {
   body: string;
   comments: RestComment[];
 }
+
+// ---- llm/client 関連 --------------------------------------------------------
+
+// LLM 構造化出力のスキーマ。SDK の JsonSchemaOutputFormat.schema と同形。
+export type JSONSchema = Record<string, unknown>;

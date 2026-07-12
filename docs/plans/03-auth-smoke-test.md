@@ -43,3 +43,20 @@
 
 - 動作する `src/llm/client.ts`（最小版、Phase 4 で機能追加）。
 - 認証継承が確認できたことのメモ（usage 実測値含む）。
+
+## 実施結果（確定事項）
+
+- **結論: 成功**。`ANTHROPIC_API_KEY` unset のまま `query()` が `claude` CLI の OAuth ログイン
+  状態を継承して動作することを実機確認した。設計（SDK 選定）を維持し Phase 4 へ進む。
+- `outputFormat: json_schema` を**第一選択**とし、使えない・`schema` 未指定のときは
+  system prompt での JSON 強制＋パース（`JSON.parse` 失敗時1回だけリトライ）に**自動
+  フォールバック**する方式を採用した（`runStructured` 内で分岐）。
+- **outputFormat の採否結論**: 安定して使えた。`structured_output` に検証済みオブジェクトが
+  直接入り、`JSON.parse` 不要でパース失敗の心配がない。今後 schema を用意できる呼び出し側
+  では outputFormat 経路を優先する。
+- スモークテスト実測値（`env -u ANTHROPIC_API_KEY RUN_LIVE=1 pnpm test tests/auth-smoke.test.ts`、
+  2026-07-12 実行、両ケースとも `answer === 2` で pass）:
+  - outputFormat 経路: `output_tokens: 66` / `total_cost_usd: 0.0131`
+  - system prompt 強制経路: `output_tokens: 10` / `total_cost_usd: 0.0110`
+  - いずれも `cache_read_input_tokens` が 20000+ あり、プロンプトキャッシュが効いている
+    （system prompt 側のオーバーヘッドが以降の呼び出しで軽減される見込み）。
