@@ -6,10 +6,13 @@
  * このファイルの責務は3つだけ:
  *   1. 引数仕様の定義とパース（自前実装、外部依存なし）
  *   2. パース結果の検証
- *   3. サブコマンドへのディスパッチ（Phase 4 まではすべて未実装メッセージ）
+ *   3. サブコマンドへのディスパッチ
  *
- * 実装ロジック（git/gh 呼び出し・LLM・レビュー処理）はここには書かない。
+ * 実装ロジック（git/gh 呼び出し・LLM・レビュー処理）はここには書かない
+ * （src/pipeline.ts / src/report.ts に委譲する）。
  */
+import { runLocalReview } from "./pipeline.js";
+import { printSummary } from "./report.js";
 
 type Command = "local" | "pr";
 
@@ -140,26 +143,39 @@ function parseArgs(argv: string[]): ParsedArgs {
   return { command, prNumber, range, comment, debug, help };
 }
 
-function dispatch(args: ParsedArgs): number {
+async function dispatch(args: ParsedArgs): Promise<number> {
   if (args.help) {
     process.stdout.write(USAGE);
     return 0;
   }
 
   if (args.command === "local") {
-    process.stderr.write("local: 未実装です（Phase 4 で実装予定）\n");
-    return 1;
+    // --range 値省略（`--range` のみ）→ range: undefined で staged 自動判別
+    // （collect-context.ts の collectContext が range 引数なしなら staged を優先する）。
+    const rangeOpt = args.range === true ? undefined : args.range;
+    try {
+      const { final, ctx } = await runLocalReview(
+        { mode: "range", range: rangeOpt },
+        { debug: args.debug },
+      );
+      printSummary(final, ctx);
+      return final.stats.confirmed > 0 ? 1 : 0;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`error: ${message}\n`);
+      return 1;
+    }
   }
 
   if (args.command === "pr") {
-    process.stderr.write("pr: 未実装です（Phase 4 で実装予定）\n");
+    process.stderr.write("pr: 未実装です（Phase 5 で実装予定）\n");
     return 1;
   }
 
   return 1;
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const argv = process.argv.slice(2);
 
   let args: ParsedArgs;
@@ -174,7 +190,7 @@ function main(): void {
     throw error;
   }
 
-  process.exit(dispatch(args));
+  process.exit(await dispatch(args));
 }
 
 main();

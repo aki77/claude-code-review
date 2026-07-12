@@ -12,6 +12,7 @@
 
 ### `src/llm/prompts.ts`
 各 LLM ステップの system/user prompt テンプレートを `review-core.md` から移植:
+- **モデルエイリアス定数はこのファイルに置く**（`MODEL_LIGHT = "sonnet"` / `MODEL_HEAVY = "opus"`）。`runStructured` の `model` はそのまま SDK `query()` → `claude` CLI へ渡り、CLI がエイリアスを解決するためフルモデル ID はハードコードしない。
 - **step2 サマリ/クラスタ分割**（`review-core.md:60-73`）: 変更のサマリ（意図・全体像）＋影響クラスタ分割案。出力 JSON: `{ summary: string, clusters: Cluster[] }`。
 - **step3 レビュー観点**（`review-core.md:81-131`）:
   - agent1/2: プロジェクトルール（CLAUDE.md / `.claude/rules/`）準拠チェック。
@@ -19,8 +20,11 @@
   - agent4: バグ検出/クロスファイル整合性（クラスタごと）。
   - agent5: REVIEW.md 準拠チェック。
   - 各出力 JSON: finding 配列（`agent`, `path`, `title`, `body`, `existingCode`, `ruleRefs?`, `category`, `severity`）。**行番号は出させない**（existingCode のみ）。
-- **step5 統合文章**（`review-core.md:178-180`）: 複数メンバーグループの `{ title, body }`。
-- **step6 検証**（`review-core.md:184-193`）: issue ごとに confirmed/rejected 判定。出力 JSON: `{ verdict, reason }`。
+  - **`FINDINGS_SCHEMA` はトップレベルを `{ findings: Finding[] }`（object）にラップする。** Anthropic API の `json_schema` 出力はトップレベルが object であることを要求し（トップレベル配列だと `400 tools.N.custom.input_schema.type: Input should be 'object'` で失敗する。実機の E2E 検証で発覚）、finding 配列を直接トップレベルにはできない。呼び出し側（steps.ts）が `result.data.findings` を取り出す。
+- **step5 統合文章**（`review-core.md:178-180`）: 複数メンバーグループの `{ title, body }`。**`groupId` は LLM に出させず、呼び出し側（steps.ts）がコード側で付与する。**
+- **step6 検証**（`review-core.md:184-193`）: issue ごとに confirmed/rejected 判定。出力 JSON: `{ verdict, reason }`。**`id` は LLM に出させず、呼び出し側（steps.ts）がコード側で付与する。**
+
+**id をコード側付与にする理由**: mergeTexts/verdicts を「1グループ/1issue につき1回 `runStructured`」に分割して並列化するため、LLM に id を出させると欠落・重複・誤記のリスクがある。呼び出し側が対応 id を機械的に貼れば `mergeFindings`（欠落/重複/未知 groupId で throw）/ `applyVerdicts`（欠落/重複/未知 id で throw）の失敗を構造的に回避できる。
 
 ### `src/llm/steps.ts`
 - `llmSummaryAndClusters(ctx, diff)` → step2。
@@ -69,6 +73,10 @@ printSummary(finalDoc, ctx)   // step8
 
 ### `src/cli.ts`
 - `local` サブコマンドを pipeline に接続。`--range [<range>]`（省略時 staged 自動判別）、`--debug`。
+- **終了コード**: confirmed な課題（`final.stats.confirmed`）が1件以上なら exit 1（CI ブロッキング用途）。課題なし/正常完了は 0。
+
+### step4b（未解決アンカー再解決）はスキップ
+Phase 4 では実装しない。未解決 finding は `resolved:false` のまま携行し FINAL に残す（`path:line` 無しで表示）。将来実装する場合の関数境界（`retryUnresolvedAnchors(findingsDoc, diffText, ctx)` → LLM に `existingCode` を再出力させ `processFindings(patch, {ctx, diffText, prev: findingsDoc})` を1回呼ぶ）はコード側にコメントで示すのみ。
 
 ## 検証（E2E）
 

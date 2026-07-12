@@ -26,7 +26,8 @@ export interface RunStructuredResult<T> {
 }
 
 // query の型（型引数なしで typeof query を直接使うと呼び出しシグネチャが煩雑になるため別名化）。
-type QueryFn = typeof query;
+// steps.ts など他モジュールからもフェイク QueryFn を注入するため export する。
+export type QueryFn = typeof query;
 
 const JSON_ONLY_INSTRUCTION =
   "\n\n出力は JSON のみ。前置き・説明文・コードフェンス（```）は一切含めないこと。";
