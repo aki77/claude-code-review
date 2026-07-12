@@ -448,16 +448,20 @@ export interface CommentBodiesInput {
 // category/severity バッジ（report.ts の formatBadge と共通）とパーマリンクを
 // commentBody 先頭に付与する。行番号/sha を LLM に触らせず TS で機械付与する
 // （設計原則「構造転写はコード」）。
+// 案C: 2行構成。1行目 = 太字バッジ行、2行目 = `<sub>📍 [path:line](permalink)</sub>`。
+// permalink 無し（line=undefined、理論上デッドケース）は防御的に場所行を省略しバッジ行のみ返す。
 function decorateCommentBody(issue: Issue, input: CommentBodiesInput): string {
-  const badge = formatBadge(issue);
+  const badge = formatBadge(issue, { bold: true });
   const line =
     issue.params && "line" in issue.params ? issue.params.line : undefined;
   const permalink =
     line !== undefined
       ? `https://github.com/${input.nameWithOwner}/blob/${input.prHeadSha}/${issue.path}#L${line}`
       : undefined;
-  const header = permalink ? `${badge} [${issue.path}](${permalink})` : badge;
-  return `${header}\n\n`;
+  const location = permalink
+    ? `\n<sub>📍 [${issue.path}:${line}](${permalink})</sub>`
+    : "";
+  return `${badge}${location}\n\n`;
 }
 
 // issue.sourceFindingIds.length !== 1 の issue は suggestion/deleteLines を剥がす
@@ -479,7 +483,8 @@ function stripSuggestionIfMerged(
 function formatDeferredSummary(deferred: Issue[]): string {
   if (deferred.length === 0) return "";
   const lines = deferred.map(
-    (issue) => `- ${formatBadge(issue)} ${issue.path}  ${issue.title}`,
+    (issue) =>
+      `- ${formatBadge(issue, { bold: true })} ${issue.path}  ${issue.title}`,
   );
   return [
     "以下の課題は行番号を確定できず、インライン投稿できませんでした。",

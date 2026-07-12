@@ -410,7 +410,10 @@ describe("llmCommentBodies", () => {
       { query },
     );
     const c = result.comments[0];
-    expect(c?.commentBody).toContain("[bug · high]");
+    expect(c?.commentBody).toContain("🐛 **Bug**");
+    expect(c?.commentBody).toContain("🟠 **High**");
+    expect(c?.commentBody).toContain("<sub>📍");
+    expect(c?.commentBody).toContain("a.ts:10");
     expect(c?.commentBody).toContain(
       "https://github.com/owner/repo/blob/sha1/a.ts#L10",
     );

@@ -61,7 +61,8 @@ describe("formatSummary", () => {
       stats: { total: 1, confirmed: 1, rejected: 0, unverified: 0 },
     });
     const out = formatSummary(final, baseCtx());
-    expect(out).toContain("[bug · high]");
+    expect(out).toContain("🐛 Bug");
+    expect(out).toContain("🟠 High");
     expect(out).toContain("a.ts:10");
     expect(out).toContain("問題タイトル");
   });
@@ -73,7 +74,7 @@ describe("formatSummary", () => {
     });
     const out = formatSummary(final, baseCtx());
     expect(out).toContain(
-      "検出 1 件（critical 0 / high 1 / medium 0 / low 0）",
+      "検出 1 件（🔴 Critical 0 / 🟠 High 1 / 🟡 Medium 0 / ⚪ Low 0）",
     );
     expect(out).toContain("本文");
   });
