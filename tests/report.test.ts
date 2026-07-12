@@ -66,7 +66,19 @@ describe("formatSummary", () => {
     expect(out).toContain("問題タイトル");
   });
 
-  it("resolved:false の issue は path のみ（行番号なし）", () => {
+  it("confirmed 1件以上のとき件数サマリ行と本文ブロックを出す", () => {
+    const final = baseFinal({
+      issues: [issue()],
+      stats: { total: 1, confirmed: 1, rejected: 0, unverified: 0 },
+    });
+    const out = formatSummary(final, baseCtx());
+    expect(out).toContain(
+      "検出 1 件（critical 0 / high 1 / medium 0 / low 0）",
+    );
+    expect(out).toContain("本文");
+  });
+
+  it("resolved:false の issue は path のみ（行番号なし）+ 未確定注記", () => {
     const final = baseFinal({
       issues: [
         issue({ resolved: false, params: undefined, reason: "アンカー未解決" }),
@@ -74,8 +86,14 @@ describe("formatSummary", () => {
       stats: { total: 1, confirmed: 1, rejected: 0, unverified: 0 },
     });
     const out = formatSummary(final, baseCtx());
-    expect(out).toContain("a.ts  問題タイトル");
+    expect(out).toContain("a.ts（行番号未確定）  問題タイトル");
     expect(out).not.toContain("a.ts:");
+  });
+
+  it("issues が0件のときは件数サマリ行を出さない", () => {
+    const out = formatSummary(baseFinal(), baseCtx());
+    expect(out).not.toContain("検出");
+    expect(out).toContain("問題は見つかりませんでした");
   });
 
   it("rejected 件数と各 title/reason を表示する", () => {

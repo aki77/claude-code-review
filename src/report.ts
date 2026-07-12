@@ -1,8 +1,11 @@
 // step8: レビュー結果のサマリをターミナルに出力する。
 //
-// review-core.md:197-203 準拠（投稿なし）。local-review なので冒頭の「変更概要」は
-// 載せない（local-review SKILL.md:29）。
-import type { Context, FinalDoc, Issue } from "./lib/types.ts";
+// review-core.md:197-203 準拠（投稿なし）。local-review では LLM 生成の「変更概要」は
+// 載せない（local-review SKILL.md:29）が、件数サマリは final.issues から決定論的に
+// 生成して先頭に出す（追加 LLM 呼び出しはゼロ）。
+
+import { SEVERITY_PRIORITY } from "./lib/process-findings.ts";
+import type { Context, FinalDoc, Issue, Severity } from "./lib/types.ts";
 
 // `[category · severity]` バッジ形式。report.ts のサマリ出力・llm/steps.ts の PR コメント
 // 本文（バッジ・欠落時のサマリ言及）で共通して使う唯一の定義。
@@ -12,22 +15,44 @@ export function formatBadge(
   return `[${issue.category ?? "-"} · ${issue.severity ?? "-"}]`;
 }
 
-function issueLine(issue: FinalDoc["issues"][number]): string {
+// 表示順は SEVERITY_PRIORITY（process-findings.ts、グループ集約の優先度定義）と同じ順序を
+// 二重管理せず導出する。
+const SEVERITY_ORDER = Object.keys(SEVERITY_PRIORITY) as Severity[];
+
+// LLM を使わず final.issues の severity 集計から件数サマリ行を組み立てる（決定論・純関数）。
+function formatCountSummary(issues: FinalDoc["issues"]): string {
+  const counts: Record<Severity, number> = {
+    critical: 0,
+    high: 0,
+    medium: 0,
+    low: 0,
+  };
+  for (const issue of issues) {
+    if (issue.severity) {
+      counts[issue.severity]++;
+    }
+  }
+  const breakdown = SEVERITY_ORDER.map((s) => `${s} ${counts[s]}`).join(" / ");
+  return `検出 ${issues.length} 件（${breakdown}）`;
+}
+
+// 見出し + 本文ブロックを返す。resolved は `path:line`、deferred は `path` のみ + 注記。
+function issueBlock(issue: FinalDoc["issues"][number]): string {
   const badge = formatBadge(issue);
   const location =
     issue.resolved && issue.params && "line" in issue.params
       ? `${issue.path}:${issue.params.line}`
-      : issue.path;
-  return `${badge} ${location}  ${issue.title}`;
+      : `${issue.path}（行番号未確定）`;
+  return `${badge} ${location}  ${issue.title}\n\n  ${issue.body}`;
 }
 
 export function formatSummary(final: FinalDoc, ctx: Context): string {
   const lines: string[] = [];
 
   if (final.issues.length > 0) {
-    for (const issue of final.issues) {
-      lines.push(issueLine(issue));
-    }
+    lines.push(formatCountSummary(final.issues));
+    lines.push("");
+    lines.push(final.issues.map((issue) => issueBlock(issue)).join("\n\n"));
   } else {
     lines.push(
       "問題は見つかりませんでした。バグ・プロジェクトルール（CLAUDE.md / .claude/rules/）準拠・REVIEW.md準拠を確認しました。",
