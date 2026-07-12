@@ -51,6 +51,9 @@ processFindings → LLMマージ → mergeFindings → LLM検証 → applyVerdic
 
 ## Gotchas
 
+- Node 24 系はフラグなしでネイティブ TypeScript 実行（型ストリッピング）が有効。dev 実行に
+  tsx/ts-node は不要で `node src/cli.ts` が直接動く（相対 import は `.js` 拡張子必須・
+  enum/namespace 不可。ビルドの型チェック＆`dist/` 出力は従来どおり `tsc` が担う）。
 - `@types/node` のバージョンは Node 本体のバージョンと一致しない
   （例: Node `v24.18.0` でも `@types/node` は `^24.1.0` 系）。npm 上の実在バージョンを
   確認してから追加すること。

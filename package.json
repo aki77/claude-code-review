@@ -12,7 +12,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "dev": "tsx src/cli.ts",
+    "dev": "node src/cli.ts",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest"
   },
@@ -22,7 +22,6 @@
   "devDependencies": {
     "@types/node": "^24.1.0",
     "typescript": "^7.0.2",
-    "tsx": "^4.20.6",
     "vitest": "^4.1.10"
   },
   "pnpm": {
