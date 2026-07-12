@@ -9,7 +9,7 @@
 //
 // このモジュールは複数スクリプト（process-findings.ts 等）から import される純粋ロジック
 // で、FS/ネットワークには依存しない（diff テキストと課題オブジェクトを受け取るだけ）。
-import type { AnchorResult, Ctx, FilesByPath, Side } from "./types.js";
+import type { AnchorResult, Ctx, FilesByPath, Params, Side } from "./types.js";
 
 // ---- diff hunk パース --------------------------------------------------------
 // unified diff の hunk ヘッダ。`@@ -oldStart,oldCount +newStart,newCount @@`
@@ -192,6 +192,14 @@ export function resolveAnchor(
     resolved: false,
     reason: "existingCode が diff に一意に一致しない（不一致または複数一致）",
   };
+}
+
+// ---- Params 範囲ヘルパー ------------------------------------------------------
+// params から [startLine, endLine] を取り出す（単一行は line が両方を兼ねる）。
+export function lineRange(params: Params): [number, number] {
+  const end = params.line;
+  const start = "startLine" in params ? params.startLine : end;
+  return [Math.min(start, end), Math.max(start, end)];
 }
 
 // ---- diff 取得引数の組み立て -------------------------------------------------

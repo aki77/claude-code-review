@@ -15,7 +15,7 @@
 //
 // main()（CLI 化・git execFileSync・artifact I/O）は移植しない（Phase 4）。
 // 純関数部分のみ移植し、git 取得は diffText 引数注入に置換。
-import { parseDiff, resolveAnchor, splitAndNormalize } from "./diff-anchor.js";
+import { lineRange, parseDiff, resolveAnchor, splitAndNormalize } from "./diff-anchor.js";
 import type {
   Category,
   Ctx,
@@ -136,13 +136,6 @@ function makeUnionFind(n: number) {
     if (ra !== rb) parent[Math.max(ra, rb)] = Math.min(ra, rb); // 小さい index を根に寄せる（安定性）
   };
   return { find, union };
-}
-
-// resolved:true の finding の params から [startLine, endLine] を取り出す。
-function lineRange(params: Params): [number, number] {
-  const end = params.line;
-  const start = "startLine" in params ? params.startLine : end;
-  return [Math.min(start, end), Math.max(start, end)];
 }
 
 // 2 つの行範囲が1行以上重なるか。
