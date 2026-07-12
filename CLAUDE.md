@@ -45,12 +45,6 @@ processFindings → LLMマージ → mergeFindings → LLM検証 → applyVerdic
 - `src/lib/types.ts`: Finding/Group/Ctx 等のデータ契約。既存 `.mjs` 実装のフィールド名を
   変えずに移植すること（回帰防止のため）。
 
-## Workflow
-
-- 実装を進める中で `docs/plans/*.md` に記載した方針の見直しが発生した場合は、
-  その場でコードだけ変更して終わらせず、該当する `docs/plans/*.md` の記述も
-  同じタイミングで更新すること（計画とコードの乖離を防ぐため）。
-
 ## Gotchas
 
 - Node 24 系はフラグなしでネイティブ TypeScript 実行（型ストリッピング）が有効。dev 実行に
