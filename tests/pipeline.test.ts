@@ -50,11 +50,22 @@ function makeFakeExec(): (
   };
 }
 
+// runStructured が渡す systemPrompt は claude_code プリセットオブジェクト
+// （{ type: "preset", append }）。判定対象のレビュー本文は append 側に入っている。
+type FakeSystemPrompt = { append?: string };
+
+function extractSystemPrompt(systemPrompt?: FakeSystemPrompt): string {
+  return systemPrompt?.append ?? "";
+}
+
 // runStructured の result 経路に合わせたフェイク query。呼び出し内容（system prompt）に
 // 応じて finding/verdict などステップごとに異なる応答を返す。
 function makeFakeQuery() {
-  return ((params: { prompt: string; options: { systemPrompt?: string } }) => {
-    const system = params.options.systemPrompt ?? "";
+  return ((params: {
+    prompt: string;
+    options: { systemPrompt?: FakeSystemPrompt };
+  }) => {
+    const system = extractSystemPrompt(params.options.systemPrompt);
     let structuredOutput: unknown;
     if (system.includes("サマリ") || system.includes("要約")) {
       structuredOutput = {
@@ -246,8 +257,10 @@ describe("runPrReview", () => {
   it("tiny-PR は summary の LLM 呼び出しが発生しない", async () => {
     const systemPrompts: string[] = [];
     const innerQuery = makeFakeQuery();
-    const query = ((params: { options: { systemPrompt?: string } }) => {
-      systemPrompts.push(params.options.systemPrompt ?? "");
+    const query = ((params: {
+      options: { systemPrompt?: FakeSystemPrompt };
+    }) => {
+      systemPrompts.push(extractSystemPrompt(params.options.systemPrompt));
       return innerQuery(params as never);
     }) as ReturnType<typeof makeFakeQuery>;
     const exec = makeFakePrExec({ headMatches: true });

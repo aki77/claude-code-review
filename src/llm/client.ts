@@ -8,6 +8,8 @@
 // 設計原則: LLM は意味判断のみ、パース・検証・リトライ制御はコード側（docs/plans/00-overview.md）。
 // 構造化出力は outputFormat: json_schema を第一選択とし、使えない/schema 未指定のときは
 // system prompt での JSON 強制 + パースにフォールバックする（docs/plans/03-auth-smoke-test.md）。
+// system prompt は claude_code プリセットを土台にし、JSON 強制指示を含むレビュー本文は
+// append で末尾に載せる（docs/plans/*-system-prompt-*.md）。
 
 import type { NonNullableUsage } from "@anthropic-ai/claude-agent-sdk";
 import { query } from "@anthropic-ai/claude-agent-sdk";
@@ -64,12 +66,15 @@ export async function runStructured<T>(
   deps?: { query?: QueryFn },
 ): Promise<RunStructuredResult<T>> {
   const queryFn = deps?.query ?? query;
-  const systemPrompt = `${opts.system}${JSON_ONLY_INSTRUCTION}`;
   const options: Parameters<QueryFn>[0]["options"] = {
     allowedTools: [],
     settingSources: [],
     permissionMode: "default",
-    systemPrompt,
+    systemPrompt: {
+      type: "preset",
+      preset: "claude_code",
+      append: `${opts.system}${JSON_ONLY_INSTRUCTION}`,
+    },
     ...(opts.model !== undefined ? { model: opts.model } : {}),
     ...(opts.schema !== undefined
       ? { outputFormat: { type: "json_schema" as const, schema: opts.schema } }
