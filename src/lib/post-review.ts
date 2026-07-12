@@ -13,6 +13,7 @@
 // 逐語テキスト）と突き合わせて「意図しない行削除」を機械検出する。検出したら suggestion を捨てて
 // 文章コメントのみ投稿する（コードは絶対に消さない・レビュー全体は止めない）。
 import { lineRange, splitAndNormalize } from "./diff-anchor.ts";
+import { execFileAsync } from "./exec.ts";
 import type {
   FinalDoc,
   Issue,
@@ -21,6 +22,8 @@ import type {
   RestComment,
   ReviewPayload,
 } from "./types.ts";
+
+type Exec = typeof execFileAsync;
 
 // params を GitHub REST の snake_case へ変換する。単一行は line+side のみ、
 // 複数行は start_line/start_side も含める。subjectType は落とす。
@@ -224,4 +227,43 @@ export function buildPayload(
     body: input.summaryBody ?? "",
     comments: restComments,
   };
+}
+
+// step10: 投稿本体（副作用）。純ロジック（buildPayload / buildSuggestionBody）は一切変更せず、
+// 検証済みペイロードを gh api 経由で REST に投稿するだけの薄い層に留める。
+export async function postReview({
+  pr,
+  nameWithOwner,
+  postInput,
+  final,
+  commitId,
+  exec = execFileAsync,
+}: {
+  pr: string;
+  nameWithOwner: string;
+  postInput: PostReviewInput;
+  final: FinalDoc;
+  commitId: string;
+  exec?: Exec;
+}): Promise<string> {
+  const payload = buildPayload(postInput, final, { commitId });
+  const result = await exec(
+    "gh",
+    [
+      "api",
+      "--method",
+      "POST",
+      `/repos/${nameWithOwner}/pulls/${pr}/reviews`,
+      "--input",
+      "-",
+    ],
+    { input: JSON.stringify(payload) },
+  );
+  if (result.code !== 0) {
+    throw new Error(
+      `PR #${pr} へのレビュー投稿に失敗しました: ${result.stderr.trim()}`,
+    );
+  }
+  const posted = JSON.parse(result.stdout);
+  return posted.html_url;
 }

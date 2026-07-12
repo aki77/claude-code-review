@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { Context, FindingsDoc, Issue } from "../src/lib/types.ts";
+import type {
+  Context,
+  FinalDoc,
+  FindingsDoc,
+  Issue,
+} from "../src/lib/types.ts";
 import {
+  llmCommentBodies,
   llmMergeTexts,
   llmReviewAgents,
   llmSummaryAndClusters,
@@ -330,5 +336,168 @@ describe("llmVerifyIssues", () => {
       query,
     });
     expect(result).toEqual([]);
+  });
+});
+
+describe("llmCommentBodies", () => {
+  function baseIssue(overrides: Partial<Issue> = {}): Issue {
+    return {
+      id: "g1",
+      path: "a.ts",
+      kind: "bug",
+      category: "bug",
+      severity: "high",
+      title: "タイトル",
+      body: "本文",
+      ruleRefs: [],
+      existingCode: "const x = 1;",
+      resolved: true,
+      sourceFindingIds: ["f1"],
+      params: { line: 10, side: "RIGHT", subjectType: "LINE" },
+      ...overrides,
+    };
+  }
+
+  function finalDoc(issues: Issue[]): FinalDoc {
+    const confirmed = issues.length;
+    return {
+      issues,
+      rejected: [],
+      unverified: [],
+      stats: { total: confirmed, confirmed, rejected: 0, unverified: 0 },
+    };
+  }
+
+  it("inlineable が0件なら query を呼ばず deferred 言及の summaryBody を返す", async () => {
+    const calls: unknown[] = [];
+    const query = makeFakeQuery({ summaryBody: "s", comments: [] }, { calls });
+    const deferredIssue = baseIssue({
+      id: "g2",
+      resolved: false,
+      params: undefined,
+    });
+    const result = await llmCommentBodies(
+      finalDoc([deferredIssue]),
+      { prHeadSha: "sha1", nameWithOwner: "owner/repo" },
+      { query },
+    );
+    expect(calls.length).toBe(0);
+    expect(result.comments).toEqual([]);
+    expect(result.summaryBody).toContain("タイトル");
+  });
+
+  it("inlineable/deferred とも0件なら「問題は見つかりませんでした。」を返す", async () => {
+    const calls: unknown[] = [];
+    const query = makeFakeQuery({ summaryBody: "s", comments: [] }, { calls });
+    const result = await llmCommentBodies(
+      finalDoc([]),
+      { prHeadSha: "sha1", nameWithOwner: "owner/repo" },
+      { query },
+    );
+    expect(calls.length).toBe(0);
+    expect(result.comments).toEqual([]);
+    expect(result.summaryBody).toBe("問題は見つかりませんでした。");
+  });
+
+  it("バッジ＋パーマリンクを TS で先頭に付与する", async () => {
+    const query = makeFakeQuery({
+      summaryBody: "サマリ",
+      comments: [{ id: "g1", commentBody: "本文コメント" }],
+    });
+    const result = await llmCommentBodies(
+      finalDoc([baseIssue()]),
+      { prHeadSha: "sha1", nameWithOwner: "owner/repo" },
+      { query },
+    );
+    const c = result.comments[0];
+    expect(c?.commentBody).toContain("[bug · high]");
+    expect(c?.commentBody).toContain(
+      "https://github.com/owner/repo/blob/sha1/a.ts#L10",
+    );
+    expect(c?.commentBody).toContain("本文コメント");
+  });
+
+  it("resolved:false は comments から除外され summaryBody に回る", async () => {
+    const query = makeFakeQuery({
+      summaryBody: "サマリのみ",
+      comments: [{ id: "g1", commentBody: "本文コメント" }],
+    });
+    const deferredIssue = baseIssue({
+      id: "g2",
+      resolved: false,
+      params: undefined,
+    });
+    const result = await llmCommentBodies(
+      finalDoc([baseIssue(), deferredIssue]),
+      { prHeadSha: "sha1", nameWithOwner: "owner/repo" },
+      { query },
+    );
+    expect(result.comments.map((c) => c.id)).toEqual(["g1"]);
+    expect(result.summaryBody).toBe("サマリのみ");
+  });
+
+  it("単一 finding 以外（統合 issue）の suggestion/deleteLines を剥がす", async () => {
+    const query = makeFakeQuery({
+      summaryBody: "s",
+      comments: [
+        {
+          id: "g1",
+          commentBody: "本文",
+          suggestion: "const x = 2;",
+          deleteLines: ["const x = 1;"],
+        },
+      ],
+    });
+    const mergedIssue = baseIssue({ sourceFindingIds: ["f1", "f2"] });
+    const result = await llmCommentBodies(
+      finalDoc([mergedIssue]),
+      { prHeadSha: "sha1", nameWithOwner: "owner/repo" },
+      { query },
+    );
+    const c = result.comments[0];
+    expect(c && "suggestion" in c).toBe(false);
+    expect(c && "deleteLines" in c).toBe(false);
+  });
+
+  it("LLM が欠落させた inlineable id を title/body から backfill する", async () => {
+    const query = makeFakeQuery({ summaryBody: "s", comments: [] });
+    const result = await llmCommentBodies(
+      finalDoc([baseIssue()]),
+      { prHeadSha: "sha1", nameWithOwner: "owner/repo" },
+      { query },
+    );
+    expect(result.comments).toHaveLength(1);
+    expect(result.comments[0]?.id).toBe("g1");
+    expect(result.comments[0]?.commentBody).toContain("本文");
+  });
+
+  it("throwing query でも fallback → backfill 後に comments が欠落せず、deferred0件なら矛盾表示にもならない", async () => {
+    const query = makeThrowingQuery();
+    const result = await llmCommentBodies(
+      finalDoc([baseIssue()]),
+      { prHeadSha: "sha1", nameWithOwner: "owner/repo" },
+      { query },
+    );
+    expect(result.comments).toHaveLength(1);
+    expect(result.comments[0]?.id).toBe("g1");
+    // インライン投稿があるのに「問題は見つかりませんでした。」と矛盾表示しないこと
+    expect(result.summaryBody).toBe("");
+  });
+
+  it("throwing query かつ deferred があれば summaryBody が deferred 一覧文言になる", async () => {
+    const query = makeThrowingQuery();
+    const deferredIssue = baseIssue({
+      id: "g2",
+      resolved: false,
+      params: undefined,
+    });
+    const result = await llmCommentBodies(
+      finalDoc([baseIssue(), deferredIssue]),
+      { prHeadSha: "sha1", nameWithOwner: "owner/repo" },
+      { query },
+    );
+    expect(result.comments).toHaveLength(1);
+    expect(result.summaryBody).not.toContain("問題は見つかりませんでした");
+    expect(result.summaryBody).toContain("タイトル");
   });
 });

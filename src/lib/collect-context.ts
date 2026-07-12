@@ -108,20 +108,35 @@ export function classifyTier(
 // range の merge base は GitHub の PR base と一致する。base コミットがローカルに無い
 // （fork PR / shallow clone）場合は actionable なメッセージで throw する。
 // exec は依存注入（既存テストスタイルに合わせ、FS/プロセス非依存でテストするため）。
+// baseRef が渡されれば gh pr view を呼ばない（呼び出し元が fetchPrMeta で既に
+// baseRefOid/baseRefName を取得済みのときに使う。gh pr view の重複呼び出しを避ける）。
 export async function resolvePrBaseRange(
   pr: string,
-  { exec = execFileAsync }: { exec?: Exec } = {},
+  {
+    exec = execFileAsync,
+    baseRef,
+  }: {
+    exec?: Exec;
+    baseRef?: { baseRefOid: string; baseRefName: string };
+  } = {},
 ): Promise<string> {
-  const raw = await exec("gh", [
-    "pr",
-    "view",
-    pr,
-    "--json",
-    "baseRefOid,baseRefName",
-  ]);
-  const meta = JSON.parse(raw.stdout);
-  const baseRefOid: string | undefined = meta.baseRefOid;
-  const baseRefName: string | undefined = meta.baseRefName;
+  let baseRefOid: string | undefined;
+  let baseRefName: string | undefined;
+  if (baseRef) {
+    baseRefOid = baseRef.baseRefOid;
+    baseRefName = baseRef.baseRefName;
+  } else {
+    const raw = await exec("gh", [
+      "pr",
+      "view",
+      pr,
+      "--json",
+      "baseRefOid,baseRefName",
+    ]);
+    const meta = JSON.parse(raw.stdout);
+    baseRefOid = meta.baseRefOid;
+    baseRefName = meta.baseRefName;
+  }
   if (!baseRefOid) {
     throw new Error(
       `PR #${pr} の baseRefOid を取得できませんでした（gh pr view の出力に baseRefOid がありません）。`,
@@ -693,7 +708,12 @@ export function buildAssignments(
 
 // ---- オーケストレータ本体 ----------------------------------------------------
 export type CollectContextOpts =
-  | { mode: "pr"; pr: string }
+  | {
+      mode: "pr";
+      pr: string;
+      // 呼び出し元が fetchPrMeta で既に取得済みなら渡す（gh pr view の重複呼び出しを避ける）。
+      baseRef?: { baseRefOid: string; baseRefName: string };
+    }
   | { mode: "range"; range?: string };
 
 export async function collectContext(
@@ -703,7 +723,7 @@ export async function collectContext(
   let range: string | undefined;
   let rawFiles: string[];
   if (opts.mode === "pr") {
-    range = await resolvePrBaseRange(opts.pr, { exec });
+    range = await resolvePrBaseRange(opts.pr, { exec, baseRef: opts.baseRef });
     rawFiles = await getChangedFilesFromRange(range, { exec });
   } else {
     // 引数なし実行 かつ ステージ済み変更あり → staged モード（コミット前レビュー）。

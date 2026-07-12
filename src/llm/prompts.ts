@@ -4,7 +4,7 @@
 // ツール禁止（runStructured は allowedTools: []）への対処として、rules 本文・REVIEW.md・
 // contextHints ファイルなど「埋め込み済み文字列」を受け取ってテンプレートへ差し込むだけに
 // 徹する。ファイルの読み込みは steps.ts が行う。
-import type { Cluster, JSONSchema } from "../lib/types.ts";
+import type { Cluster, Issue, JSONSchema } from "../lib/types.ts";
 
 // ---- モデルエイリアス定数 ----------------------------------------------------
 // runStructured の model はそのまま SDK query() → claude CLI へ渡る（client.ts）。
@@ -106,6 +106,30 @@ export const VERDICT_SCHEMA: JSONSchema = {
     reason: { type: "string" },
   },
   required: ["verdict", "reason"],
+};
+
+// step9: PR コメント本文作成。```suggestion フェンス（buildSuggestionBody が組む、
+// post-review.ts:142）と category/severity バッジ・パーマリンク（steps.ts が TS で付与）は
+// スキーマに含めない。LLM には文章と「置換後の行だけ」の suggestion 案のみを書かせる。
+export const COMMENT_BODIES_SCHEMA: JSONSchema = {
+  type: "object",
+  properties: {
+    summaryBody: { type: "string" },
+    comments: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          commentBody: { type: "string" },
+          suggestion: { type: "array", items: { type: "string" } },
+          deleteLines: { type: "array", items: { type: "string" } },
+        },
+        required: ["id", "commentBody"],
+      },
+    },
+  },
+  required: ["summaryBody", "comments"],
 };
 
 // ---- 共通の「参照コンテキストなし」文言 --------------------------------------
@@ -390,5 +414,53 @@ export function verifyUser({
     `body: ${issue.body}` +
     lineInfo +
     "\n\nこの課題が実際の問題かどうかを検証し、verdict と reason を返してください。"
+  );
+}
+
+// ---- step9: PR コメント本文作成 ------------------------------------------------
+
+export function commentBodiesSystem(): string {
+  return (
+    "あなたは確定した課題一覧を GitHub PR レビューコメントの文章に仕立てるアシスタントです。\n" +
+    "各課題の commentBody には、指摘内容の説明文のみを書いてください。" +
+    "category/severity のバッジや引用元パーマリンクは書かないこと（コード側が自動的に先頭へ付与します）。\n" +
+    "suggestion は、修正が小規模・自己完結・かつ単一 finding 由来の課題のときのみ付けてください" +
+    "（複数の指摘が統合された課題には付けないこと）。\n" +
+    "suggestion を書く場合は ```suggestion フェンスを書かず、置換後の行だけを配列で渡してください。" +
+    "existingCode の行のうち、suggestion に残らず削除される行があれば、その行の内容をそのまま" +
+    "deleteLines に明示してください（明示が無い・不足していると suggestion は投稿時に破棄されます）。\n" +
+    "resolved:false（行番号未確定）の課題は comments に含めず、summaryBody 側で言及してください。"
+  );
+}
+
+export function commentBodiesUser({
+  inlineable,
+  deferred,
+}: {
+  inlineable: Issue[];
+  deferred: Issue[];
+}): string {
+  const formatIssue = (issue: Issue) =>
+    `### id: ${issue.id}\n` +
+    `path: ${issue.path}\n` +
+    `category: ${issue.category ?? "-"}\n` +
+    `severity: ${issue.severity ?? "-"}\n` +
+    `title: ${issue.title}\n` +
+    `body: ${issue.body}\n` +
+    `existingCode:\n${issue.existingCode ?? "（なし）"}`;
+
+  const inlineableSection =
+    inlineable.length > 0
+      ? inlineable.map(formatIssue).join("\n\n")
+      : "（なし）";
+  const deferredSection =
+    deferred.length > 0 ? deferred.map(formatIssue).join("\n\n") : "（なし）";
+
+  return (
+    `## インライン投稿対象（行番号確定済み）\n${inlineableSection}\n\n` +
+    `## サマリのみ言及対象（行番号未確定）\n${deferredSection}\n\n` +
+    "インライン投稿対象それぞれについて { id, commentBody, suggestion?, deleteLines? } を、" +
+    "サマリのみ言及対象については summaryBody 内で触れてください。" +
+    '出力は { "summaryBody": string, "comments": [...] } の形にすること。'
   );
 }

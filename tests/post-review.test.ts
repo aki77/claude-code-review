@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildPayload, buildSuggestionBody } from "../src/lib/post-review.ts";
+import type { ExecResult } from "../src/lib/exec.ts";
+import {
+  buildPayload,
+  buildSuggestionBody,
+  postReview,
+} from "../src/lib/post-review.ts";
 import type { FinalDoc, Issue } from "../src/lib/types.ts";
 
 // テストで変化しない共通フィールドを既定値にし、各ケースは差分（id/path/existingCode/
@@ -387,5 +392,109 @@ describe("post-review", () => {
       { commitId: "x" },
     );
     expect(p.comments).toEqual([]);
+  });
+});
+
+function makeFakeExec(
+  handler: (
+    command: string,
+    args: string[],
+    options?: { input?: string },
+  ) => ExecResult,
+): (
+  command: string,
+  args: string[],
+  options?: { input?: string },
+) => Promise<ExecResult> {
+  return async (command, args, options) => handler(command, args, options);
+}
+
+describe("postReview", () => {
+  it("gh api の argv と stdin payload、html_url を検証する", async () => {
+    const calls: { command: string; args: string[]; input?: string }[] = [];
+    const exec = makeFakeExec((command, args, options) => {
+      calls.push({ command, args, input: options?.input });
+      return {
+        stdout: JSON.stringify({ html_url: "https://example.com/pr/1" }),
+        stderr: "",
+        code: 0,
+      };
+    });
+
+    const url = await postReview({
+      pr: "1",
+      nameWithOwner: "owner/repo",
+      postInput: {
+        summaryBody: "s",
+        comments: [
+          { id: "g1", commentBody: "x" },
+          { id: "g2", commentBody: "y" },
+        ],
+      },
+      final: makeBaseFinalDoc(),
+      commitId: "abc123",
+      exec,
+    });
+
+    expect(url).toBe("https://example.com/pr/1");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.command).toBe("gh");
+    expect(calls[0]?.args).toEqual([
+      "api",
+      "--method",
+      "POST",
+      "/repos/owner/repo/pulls/1/reviews",
+      "--input",
+      "-",
+    ]);
+    const payload = JSON.parse(calls[0]?.input ?? "{}");
+    expect(payload.commit_id).toBe("abc123");
+    expect(payload.event).toBe("COMMENT");
+  });
+
+  it("code!==0 は stderr を含めて throw する", async () => {
+    const exec = makeFakeExec(() => ({
+      stdout: "",
+      stderr: "HTTP 422",
+      code: 1,
+    }));
+    await expect(
+      postReview({
+        pr: "1",
+        nameWithOwner: "owner/repo",
+        postInput: {
+          summaryBody: "s",
+          comments: [
+            { id: "g1", commentBody: "x" },
+            { id: "g2", commentBody: "y" },
+          ],
+        },
+        final: makeBaseFinalDoc(),
+        commitId: "abc123",
+        exec,
+      }),
+    ).rejects.toThrow(/HTTP 422/);
+  });
+
+  it("buildPayload の黙殺防止 throw が exec 呼び出し前に発生する", async () => {
+    const calls: unknown[] = [];
+    const exec = makeFakeExec(() => {
+      calls.push(1);
+      return { stdout: "{}", stderr: "", code: 0 };
+    });
+    await expect(
+      postReview({
+        pr: "1",
+        nameWithOwner: "owner/repo",
+        postInput: {
+          summaryBody: "s",
+          comments: [{ id: "g1", commentBody: "x" }],
+        },
+        final: makeBaseFinalDoc(),
+        commitId: "abc123",
+        exec,
+      }),
+    ).rejects.toThrow(/黙殺防止/);
+    expect(calls).toHaveLength(0);
   });
 });

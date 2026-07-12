@@ -2,7 +2,7 @@
 // E2E をユニット再現する（docs/plans/04-llm-steps.md のテスト方針）。
 import { describe, expect, it } from "vitest";
 import type { ExecResult } from "../src/lib/exec.ts";
-import { runLocalReview } from "../src/pipeline.ts";
+import { runLocalReview, runPrReview } from "../src/pipeline.ts";
 
 const DIFF_TEXT = `diff --git a/a.ts b/a.ts
 index 0000000..1111111 100644
@@ -86,6 +86,14 @@ function makeFakeQuery() {
       structuredOutput = { findings: [] };
     } else if (system.includes("REVIEW.md")) {
       structuredOutput = { findings: [] };
+    } else if (system.includes("PR レビューコメントの文章")) {
+      const idMatch = params.prompt.match(/id: (\S+)/);
+      structuredOutput = {
+        summaryBody: "サマリ本文",
+        comments: idMatch
+          ? [{ id: idMatch[1], commentBody: "コメント本文" }]
+          : [],
+      };
     } else if (system.includes("統合")) {
       structuredOutput = { title: "統合タイトル", body: "統合本文" };
     } else {
@@ -139,5 +147,164 @@ describe("runLocalReview", () => {
     expect(ctx.tier).toBe("tiny");
     expect(final.stats.confirmed).toBe(1);
     expect(final.issues[0]?.title).toContain("未定義変数");
+  });
+});
+
+// runPrReview 用フェイク exec。fetchPrMeta (gh pr view title,body,commits,headRefOid,
+// baseRefOid,baseRefName を1回で取得。resolvePrBaseRange はこの baseRef を受け取るため
+// gh pr view を呼ばない) と、collectContext({mode:"pr"}) が呼ぶ git cat-file / git merge-base /
+// getChangedFilesFromRange (git diff --name-only)、assertPrHeadMatches (git rev-parse HEAD)、
+// getNameWithOwner (gh repo view) をルーティングする。
+function makeFakePrExec(opts: {
+  headMatches: boolean;
+}): (command: string, args: string[]) => Promise<ExecResult> {
+  return async (command: string, args: string[]): Promise<ExecResult> => {
+    if (command === "gh" && args[0] === "pr" && args[1] === "view") {
+      if (
+        args.includes("title,body,commits,headRefOid,baseRefOid,baseRefName")
+      ) {
+        return {
+          stdout: JSON.stringify({
+            title: "PRタイトル",
+            body: "PR説明",
+            commits: [{ messageHeadline: "feat: 追加" }],
+            headRefOid: "head111",
+            baseRefOid: "base000",
+            baseRefName: "main",
+          }),
+          stderr: "",
+          code: 0,
+        };
+      }
+    }
+    if (command === "gh" && args[0] === "repo" && args[1] === "view") {
+      return { stdout: "owner/repo\n", stderr: "", code: 0 };
+    }
+    if (command === "gh" && args[0] === "api") {
+      return {
+        stdout: JSON.stringify({ html_url: "https://example.com/pr/1" }),
+        stderr: "",
+        code: 0,
+      };
+    }
+    if (command !== "git") return { stdout: "", stderr: "", code: 0 };
+
+    if (args[0] === "cat-file") {
+      return { stdout: "", stderr: "", code: 0 };
+    }
+    if (args[0] === "merge-base") {
+      return { stdout: "merged000\n", stderr: "", code: 0 };
+    }
+    if (args[0] === "rev-parse" && args.includes("HEAD")) {
+      return {
+        stdout: opts.headMatches ? "head111\n" : "other999\n",
+        stderr: "",
+        code: 0,
+      };
+    }
+    if (
+      args[0] === "diff" &&
+      args.includes("--name-only") &&
+      args.includes("--find-renames")
+    ) {
+      return { stdout: "a.ts\n", stderr: "", code: 0 };
+    }
+    if (args[0] === "check-attr") {
+      return { stdout: "", stderr: "", code: 0 };
+    }
+    if (args[0] === "diff" && args.includes("--numstat")) {
+      return { stdout: "1\t1\ta.ts\n", stderr: "", code: 0 };
+    }
+    if (
+      args.includes("diff") &&
+      !args.includes("--numstat") &&
+      !args.includes("--name-only")
+    ) {
+      return { stdout: DIFF_TEXT, stderr: "", code: 0 };
+    }
+    return { stdout: "", stderr: "", code: 0 };
+  };
+}
+
+describe("runPrReview", () => {
+  it("--comment:false → final+ctx を返し gh api は呼ばれない", async () => {
+    const exec = makeFakePrExec({ headMatches: true });
+    const query = makeFakeQuery();
+    const readFile = () => null;
+
+    const result = await runPrReview(
+      "1",
+      { debug: false, comment: false },
+      { exec: exec as never, query, readFile },
+    );
+
+    expect(result.headRefOid).toBe("head111");
+    expect(result.postedUrl).toBeUndefined();
+    expect(result.final.stats.confirmed).toBe(1);
+  });
+
+  it("tiny-PR は summary の LLM 呼び出しが発生しない", async () => {
+    const systemPrompts: string[] = [];
+    const innerQuery = makeFakeQuery();
+    const query = ((params: { options: { systemPrompt?: string } }) => {
+      systemPrompts.push(params.options.systemPrompt ?? "");
+      return innerQuery(params as never);
+    }) as ReturnType<typeof makeFakeQuery>;
+    const exec = makeFakePrExec({ headMatches: true });
+    const readFile = () => null;
+
+    const result = await runPrReview(
+      "1",
+      { debug: false, comment: false },
+      { exec: exec as never, query, readFile },
+    );
+
+    expect(result.ctx.tier).toBe("tiny");
+    expect(
+      systemPrompts.some((s) => s.includes("サマリ") || s.includes("要約")),
+    ).toBe(false);
+  });
+
+  it("--comment:true → gh api が1回呼ばれ postedUrl を返す", async () => {
+    const calls: { command: string; args: string[] }[] = [];
+    const baseExec = makeFakePrExec({ headMatches: true });
+    const exec = async (command: string, args: string[], options?: unknown) => {
+      calls.push({ command, args });
+      return baseExec(command, args, options as never);
+    };
+    const query = makeFakeQuery();
+    const readFile = () => null;
+
+    const result = await runPrReview(
+      "1",
+      { debug: false, comment: true },
+      { exec: exec as never, query, readFile },
+    );
+
+    expect(result.postedUrl).toBe("https://example.com/pr/1");
+    const apiCalls = calls.filter(
+      (c) => c.command === "gh" && c.args[0] === "api",
+    );
+    expect(apiCalls).toHaveLength(1);
+  });
+
+  it("HEAD 不一致時は query が呼ばれる前に throw する", async () => {
+    const exec = makeFakePrExec({ headMatches: false });
+    const calls: unknown[] = [];
+    const innerQuery = makeFakeQuery();
+    const query = ((params: unknown) => {
+      calls.push(params);
+      return innerQuery(params as never);
+    }) as typeof innerQuery;
+    const readFile = () => null;
+
+    await expect(
+      runPrReview(
+        "1",
+        { debug: false, comment: false },
+        { exec: exec as never, query, readFile },
+      ),
+    ).rejects.toThrow(/一致しません/);
+    expect(calls.length).toBe(0);
   });
 });
