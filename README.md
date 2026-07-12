@@ -50,9 +50,12 @@ pnpm dev -- pr <number> [--comment] [--debug]
 
 ## 認証の仕組み
 
-`ANTHROPIC_API_KEY` は使わない。内部で `@anthropic-ai/claude-agent-sdk` が `claude` CLI を
-起動し、CLI の OAuth ログイン状態を継承する。したがって動作させるには事前に `claude` CLI で
-ログイン済みである必要がある。API キー前提の環境変数は不要。
+内部で `@anthropic-ai/claude-agent-sdk` が `claude` CLI を起動し、その CLI が解決した認証を
+そのまま継承する。このツール自体は認証情報を明示的に渡さないため、`claude` CLI が利用できる
+認証方式（OAuth ログイン / `CLAUDE_CODE_OAUTH_TOKEN` などのトークン環境変数 /
+`ANTHROPIC_API_KEY` などの API キー環境変数）のいずれでも動作する。
+
+事前に `claude` CLI でログイン済みか、対応する認証用の環境変数が設定されていれば動く。
 
 ## env しきい値一覧（`CODE_REVIEW_*`）
 
