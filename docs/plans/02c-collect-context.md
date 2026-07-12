@@ -4,6 +4,14 @@
 git/gh 副作用を多数含む。**元 `.mjs` は関数を export していない**ため、切り出して
 export 化しながら移植する。02a の `exec.ts` に依存するため 02a 完了後に着手。
 
+型の置き場所: 新規型（`Context` 等）も 02a と同方針で `src/lib/types.ts` に集約し、
+`collect-context.ts` はそこから import する。
+
+exec.ts の前提条件: `detectLinguistExcluded`（下記）が `git check-attr --stdin -z` に
+NUL 区切り文字列を stdin 供給する必要があるが、02a 時点の `exec.ts`（`execFileAsync`）は
+`input` オプションを持たない。本フェーズ着手時に `exec.ts` へ `options.input?: string`
+（子プロセスの stdin へ書き込み）を追加すること（詳細は 02a の exec.ts セクション参照）。
+
 参照元: `/Users/aki/src/github.com/aki77/claude-plugins/plugins/code-review/scripts/collect-review-context.mjs`
 
 ## ゴール
@@ -20,6 +28,7 @@ export 化しながら移植する。02a の `exec.ts` に依存するため 02a
   除外 glob（`*.min.js`/`dist/**`/画像/フォント/アーカイブ/動画音声）OR attrExcludedSet。
   `.gitattributes` の linguist（generated/vendored/documentation）は `git check-attr --stdin -z`
   で一括判定（`parseCheckAttrOutput`、ATTR_NEGATIVE_VALUES={unspecified,unset,false} 以外を除外）。
+  stdin にはファイル一覧を NUL 区切りで供給する（`exec.ts` の `input` オプション経由、上記参照）。
 - `collectChangedLines(diffArgs, excludeArgs)`: `git diff --numstat --find-renames`。
   バイナリ（added/deleted が `-`→null）は集計・perFile から除外。失敗時は tier を落とさず全 0/空 Map。
 - `splitOversized(keptFiles, perFile, maxLines)`: `added+deleted > maxLines`（**strictly greater**）

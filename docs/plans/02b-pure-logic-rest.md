@@ -3,6 +3,10 @@
 前提: `00-overview.md` 契約厳守。LLM 非依存。3 本とも child_process 完全非依存の
 純粋関数で、02a に比べ独立性が高い。02a 完了後に着手。
 
+型の置き場所: 新規型（`Cluster`/`ClustersDoc`/`Issue`/`IssuesDoc`/`MergeText`/`Verdict`/
+`FinalDoc`）も 02a と同方針で `src/lib/types.ts` に集約し、各 `.ts` はそこから import する
+（各ファイル個別定義はしない）。
+
 参照元: `/Users/aki/src/github.com/aki77/claude-plugins/plugins/code-review/scripts/`
 
 ## ゴール

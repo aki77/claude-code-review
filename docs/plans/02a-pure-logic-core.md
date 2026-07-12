@@ -18,6 +18,15 @@
 - 型: `ExecResult { stdout: string; stderr: string; code: number }`。
   非 0 終了を throw するか結果で返すかは呼び出し側の使い分けに合わせる
   （collect-context は失敗時 tier を落とさず全 0 を返す設計 → code を見て分岐できる形にする）。
+- **未解決課題（02a 実装時点では未対応・02c 着手時に要追加）**: 移植元は
+  `git check-attr --stdin -z ...`（collect-context の `detectLinguistExcluded`）と
+  `gh api ... --input -`（post-review の投稿・Phase 5）で `execFileSync` の
+  `options.input` に文字列（NUL 区切り / JSON）を渡し stdin 供給している。
+  02a で実装した `execFileAsync(command, args, { cwd?, maxBuffer? })` は `input` を
+  受け付けず、そもそも非同期 `execFile` は同期版の `options.input` を持たない
+  （子プロセスの stdin へ書き込む実装が別途必要）。02c/Phase 5 着手時に
+  `options.input?: string` を追加し、`spawn` ベースへの切替か `execFile` が返す
+  child の `stdin.end(input)` で対応すること。
 
 ### 2. `src/lib/diff-anchor.ts` ← `scripts/lib/diff-anchor.mjs`（純ロジック・依存ゼロ）
 - 正規表現: `hunkHeaderRe`（count 省略可 `@@ -a[,b] +c[,d] @@`）, `fileHeaderRe`（b/ 側新パス採用）。

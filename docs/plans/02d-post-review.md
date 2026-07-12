@@ -4,6 +4,14 @@
 純ロジック（toComment / buildSuggestionBody / buildPayload の検証）は Phase 2 で移植可能。
 02a の diff-anchor（splitAndNormalize）に依存するため 02a 完了後に着手。
 
+型の置き場所: REST コメント型等の新規型も 02a と同方針で `src/lib/types.ts` に集約し、
+`post-review.ts` はそこから import する。
+
+exec.ts の前提条件: 投稿本体（`gh api ... --input -`、Phase 5）は JSON を stdin 供給する
+必要があるが、02a 時点の `exec.ts`（`execFileAsync`）は `input` オプションを持たない。
+Phase 5 着手時に `exec.ts` へ `options.input?: string` を追加すること
+（02c と同じ不足・詳細は 02a の exec.ts セクション参照）。
+
 参照元: `/Users/aki/src/github.com/aki77/claude-plugins/plugins/code-review/scripts/post-review.mjs`
 
 ## ゴール
@@ -28,9 +36,10 @@ fail-closed の破壊ガードと黙殺防止のテストが green。
   resolved 済み 0 件ならサマリのみ投稿を許容（課題ゼロ）。suggestion が危険なら withStrippedNote で
   文章のみ（例外にせず fail-closed）。戻り `{commit_id, event:"COMMENT", body, comments}`。
 - 内部: toSuggestionLines, rangeLineCount, withStrippedNote。
-- 投稿本体（`gh api POST /repos/{owner}/{repo}/pulls/<n>/reviews --input -`）は Phase 5 で `exec.ts` 経由。
-  Phase 2d では純ロジック（payload 組み立て）まで。
-- 型: 既存 Issue/FinalDoc（02a/02b）を再利用。REST コメント型を追加。
+- 投稿本体（`gh api POST /repos/{owner}/{repo}/pulls/<n>/reviews --input -`）は Phase 5 で
+  `exec.ts` 経由（JSON.stringify(payload) を `input` オプションで stdin 供給。上記の
+  exec.ts 前提条件を参照）。Phase 2d では純ロジック（payload 組み立て）まで。
+- 型: 既存 Issue/FinalDoc（**02b**）を再利用。REST コメント型を追加（types.ts に集約）。
 
 ## テスト（元 256-497 行）
 buildPayload 基本形、toComment 単一/複数行 snake_case、suggestion 有無、
