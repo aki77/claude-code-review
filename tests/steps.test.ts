@@ -386,6 +386,19 @@ describe("llmCommentBodies", () => {
     expect(result.summaryBody).toContain("タイトル");
   });
 
+  it("inlineable/deferred とも0件なら「問題は見つかりませんでした。」を返す", async () => {
+    const calls: unknown[] = [];
+    const query = makeFakeQuery({ summaryBody: "s", comments: [] }, { calls });
+    const result = await llmCommentBodies(
+      finalDoc([]),
+      { prHeadSha: "sha1", nameWithOwner: "owner/repo" },
+      { query },
+    );
+    expect(calls.length).toBe(0);
+    expect(result.comments).toEqual([]);
+    expect(result.summaryBody).toBe("問題は見つかりませんでした。");
+  });
+
   it("バッジ＋パーマリンクを TS で先頭に付与する", async () => {
     const query = makeFakeQuery({
       summaryBody: "サマリ",
@@ -458,7 +471,7 @@ describe("llmCommentBodies", () => {
     expect(result.comments[0]?.commentBody).toContain("本文");
   });
 
-  it("throwing query でも fallback → backfill 後に comments が欠落しない", async () => {
+  it("throwing query でも fallback → backfill 後に comments が欠落せず、deferred0件なら矛盾表示にもならない", async () => {
     const query = makeThrowingQuery();
     const result = await llmCommentBodies(
       finalDoc([baseIssue()]),
@@ -467,5 +480,24 @@ describe("llmCommentBodies", () => {
     );
     expect(result.comments).toHaveLength(1);
     expect(result.comments[0]?.id).toBe("g1");
+    // インライン投稿があるのに「問題は見つかりませんでした。」と矛盾表示しないこと
+    expect(result.summaryBody).toBe("");
+  });
+
+  it("throwing query かつ deferred があれば summaryBody が deferred 一覧文言になる", async () => {
+    const query = makeThrowingQuery();
+    const deferredIssue = baseIssue({
+      id: "g2",
+      resolved: false,
+      params: undefined,
+    });
+    const result = await llmCommentBodies(
+      finalDoc([baseIssue(), deferredIssue]),
+      { prHeadSha: "sha1", nameWithOwner: "owner/repo" },
+      { query },
+    );
+    expect(result.comments).toHaveLength(1);
+    expect(result.summaryBody).not.toContain("問題は見つかりませんでした");
+    expect(result.summaryBody).toContain("タイトル");
   });
 });

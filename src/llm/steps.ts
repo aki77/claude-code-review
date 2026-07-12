@@ -463,10 +463,12 @@ function stripSuggestionIfMerged(
   return rest;
 }
 
-// deferred（resolved:false）issue をサマリ本文へ機械的に言及する文言を生成する
-// （inlineable が0件で LLM を呼ばないときに使う）。
+// deferred（resolved:false）issue をサマリ本文へ機械的に言及する文言を生成する。
+// deferred が0件なら空文字を返す（「問題は見つかりませんでした。」は全体ゼロ件専用の文言
+// であり、ここには含めない。inlineable>0 の最終 return からもフォールバックとして呼ばれる
+// ため、ここで全体ゼロ件文言を混ぜると矛盾表示になる）。
 function formatDeferredSummary(deferred: Issue[]): string {
-  if (deferred.length === 0) return "問題は見つかりませんでした。";
+  if (deferred.length === 0) return "";
   const lines = deferred.map(
     (issue) => `- ${formatBadge(issue)} ${issue.path}  ${issue.title}`,
   );
@@ -488,7 +490,13 @@ export async function llmCommentBodies(
   const deferred = final.issues.filter((i) => !i.resolved);
 
   if (inlineable.length === 0) {
-    return { summaryBody: formatDeferredSummary(deferred), comments: [] };
+    // inlineable/deferred とも0件 = レビュー全体で指摘ゼロのときだけ、この文言を使う
+    // （formatDeferredSummary は deferred一覧生成に純化済みで全体ゼロ件文言を含まない）。
+    const summaryBody =
+      deferred.length === 0
+        ? "問題は見つかりませんでした。"
+        : formatDeferredSummary(deferred);
+    return { summaryBody, comments: [] };
   }
 
   const raw = await runAgentSafe<PostReviewInput>(
