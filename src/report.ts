@@ -2,10 +2,18 @@
 //
 // review-core.md:197-203 準拠（投稿なし）。local-review なので冒頭の「変更概要」は
 // 載せない（local-review SKILL.md:29）。
-import type { Context, FinalDoc } from "./lib/types.ts";
+import type { Context, FinalDoc, Issue } from "./lib/types.ts";
+
+// `[category · severity]` バッジ形式。report.ts のサマリ出力・llm/steps.ts の PR コメント
+// 本文（バッジ・欠落時のサマリ言及）で共通して使う唯一の定義。
+export function formatBadge(
+  issue: Pick<Issue, "category" | "severity">,
+): string {
+  return `[${issue.category ?? "-"} · ${issue.severity ?? "-"}]`;
+}
 
 function issueLine(issue: FinalDoc["issues"][number]): string {
-  const badge = `[${issue.category ?? "-"} · ${issue.severity ?? "-"}]`;
+  const badge = formatBadge(issue);
   const location =
     issue.resolved && issue.params && "line" in issue.params
       ? `${issue.path}:${issue.params.line}`

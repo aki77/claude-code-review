@@ -11,7 +11,7 @@
  * 実装ロジック（git/gh 呼び出し・LLM・レビュー処理）はここには書かない
  * （src/pipeline.ts / src/report.ts に委譲する）。
  */
-import { runLocalReview } from "./pipeline.ts";
+import { runLocalReview, runPrReview } from "./pipeline.ts";
 import { printSummary } from "./report.ts";
 
 type Command = "local" | "pr";
@@ -168,8 +168,22 @@ async function dispatch(args: ParsedArgs): Promise<number> {
   }
 
   if (args.command === "pr") {
-    process.stderr.write("pr: 未実装です（Phase 5 で実装予定）\n");
-    return 1;
+    try {
+      const { final, ctx, postedUrl } = await runPrReview(
+        String(args.prNumber),
+        {
+          debug: args.debug,
+          comment: args.comment,
+        },
+      );
+      printSummary(final, ctx);
+      if (postedUrl) process.stdout.write(`posted: ${postedUrl}\n`);
+      return final.stats.confirmed > 0 ? 1 : 0;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`error: ${message}\n`);
+      return 1;
+    }
   }
 
   return 1;

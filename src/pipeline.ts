@@ -1,10 +1,10 @@
-// パイプラインのオーケストレータ（local-review E2E）。
+// パイプラインのオーケストレータ（local-review / pr-review 共通コア）。
 //
-// データフロー（docs/plans/04-llm-steps.md）:
+// データフロー（docs/plans/04-llm-steps.md, docs/plans/05-pr-review-and-wrapup.md）:
 //   collectContext → diff 取得 → 著者意図情報 → llmSummaryAndClusters →
 //   clusters 確定（validateClusters / tierReducedClusters）→ llmReviewAgents →
 //   processFindings → [step4b スキップ] → llmMergeTexts → mergeFindings →
-//   llmVerifyIssues → applyVerdicts → 呼び出し側が出力
+//   llmVerifyIssues → applyVerdicts → (pr-review のみ) llmCommentBodies → postReview
 import { applyVerdicts } from "./lib/apply-verdicts.ts";
 import {
   type CollectContextOpts,
@@ -13,6 +13,13 @@ import {
 import { buildDiffArgs } from "./lib/diff-anchor.ts";
 import { execFileAsync } from "./lib/exec.ts";
 import { mergeFindings } from "./lib/merge-findings.ts";
+import { postReview } from "./lib/post-review.ts";
+import { assertPrHeadMatches } from "./lib/pr-head.ts";
+import {
+  fetchPrMeta,
+  formatPrAuthorInfo,
+  getNameWithOwner,
+} from "./lib/pr-meta.ts";
 import { processFindings } from "./lib/process-findings.ts";
 import type { Context, FinalDoc } from "./lib/types.ts";
 import {
@@ -23,6 +30,7 @@ import type { QueryFn } from "./llm/client.ts";
 import {
   type DebugSink,
   defaultReadFile,
+  llmCommentBodies,
   llmMergeTexts,
   llmReviewAgents,
   llmSummaryAndClusters,
@@ -43,34 +51,30 @@ export interface PipelineResult {
   ctx: Context;
 }
 
+export interface PrReviewResult extends PipelineResult {
+  postedUrl?: string;
+  headRefOid: string;
+}
+
 // diff の maxBuffer。巨大な diff でも打ち切られないよう大きめに確保する。
 const DIFF_MAX_BUFFER = 256 * 1024 * 1024;
 
 // 著者意図情報がコミットメッセージから得られない（staged / git log 空）場合の共通フォールバック文言。
 const DIFF_ONLY_AUTHOR_INFO = "diff のみから意図推定してください。";
 
-export async function runLocalReview(
-  opts: CollectContextOpts,
-  runOpts: { debug: boolean },
-  deps: PipelineDeps = {},
-): Promise<PipelineResult> {
-  const exec = deps.exec ?? execFileAsync;
-  const query = deps.query;
-  const readFile = deps.readFile ?? defaultReadFile;
+// local-review / pr-review 共通コア（CTX 確定後〜FINAL 生成まで）。
+// skipSummaryAgent: true なら summary/clusters の LLM 呼び出しをスキップし、authorInfo を
+// そのまま summary に使う（tiny-PR コスト削減。docs/plans/05-pr-review-and-wrapup.md 参照）。
+async function runReviewCore(
+  ctx: Context,
+  authorInfo: string,
+  skipSummaryAgent: boolean,
+  deps: Required<Pick<PipelineDeps, "exec" | "readFile">> &
+    Pick<PipelineDeps, "query"> & { debug: DebugSink },
+): Promise<FinalDoc> {
+  const { exec, query, readFile, debug } = deps;
 
-  const debug: DebugSink = runOpts.debug
-    ? (label, obj) => {
-        process.stderr.write(
-          `[debug] ${label}:\n${JSON.stringify(obj, null, 2)}\n`,
-        );
-      }
-    : () => {};
-
-  // 1. CTX 確定。
-  const ctx = await collectContext(opts, { exec });
-  debug("ctx", ctx);
-
-  // 2. diff 取得（統一 diff。以降の全ステップがこの diff を使う）。
+  // diff 取得（統一 diff。以降の全ステップがこの diff を使う）。
   const diffResult = await exec("git", buildDiffArgs(ctx), {
     maxBuffer: DIFF_MAX_BUFFER,
   });
@@ -84,10 +88,97 @@ export async function runLocalReview(
       stats: { total: 0, confirmed: 0, rejected: 0, unverified: 0 },
     };
     debug("final", emptyFinal);
-    return { final: emptyFinal, ctx };
+    return emptyFinal;
   }
 
-  // 3. 著者意図情報。staged はコミットが無いため diff のみの固定文言、それ以外（range）は
+  // サマリ + クラスタ分割案。tiny-PR は summary の LLM 呼び出しを省き、著者意図情報
+  // （PR タイトル/説明）をそのまま summary に流す（LLM 1回分のコスト削減）。
+  let summary: string | null;
+  let rawClusters: unknown;
+  if (skipSummaryAgent) {
+    summary = authorInfo;
+    rawClusters = [];
+  } else {
+    const result = await llmSummaryAndClusters(ctx, diffText, authorInfo, {
+      query,
+      debug,
+    });
+    summary = result.summary;
+    rawClusters = result.rawClusters;
+  }
+  debug("summary", summary);
+
+  // clusters 確定。normal のみ LLM 出力を検証、それ以外は決定論的縮退。
+  const clustersDoc =
+    ctx.tier === "normal" && !skipSummaryAgent
+      ? validateClusters(rawClusters, ctx.changedFiles)
+      : tierReducedClusters(ctx.changedFiles);
+  debug("clustersDoc", clustersDoc);
+
+  // レビューエージェント（agent1〜5）。
+  const rawFindings = await llmReviewAgents(
+    { ctx, diffText, clusters: clustersDoc.clusters, summary },
+    { query, readFile, debug },
+  );
+
+  // finding 機械処理。
+  const findingsDoc = processFindings(rawFindings, { ctx, diffText });
+  debug("findingsDoc", findingsDoc);
+
+  // step4b スキップ（Phase 4 では未解決アンカー再解決を行わない）: unresolved 件数のみ
+  // debug 出力する。将来的には retryUnresolvedAnchors(findingsDoc, diffText, ctx) を呼び、
+  // LLM に existingCode を再出力させて processFindings(patch, {ctx, diffText, prev: findingsDoc})
+  // を1回呼ぶ形になる（この関数境界はまだ実装していない）。
+  if (findingsDoc.stats.unresolved > 0) {
+    debug("unresolved-skip", { unresolved: findingsDoc.stats.unresolved });
+  }
+
+  // 統合文章作成。
+  const mergeTexts = await llmMergeTexts(findingsDoc, { query, debug });
+  debug("mergeTexts", mergeTexts);
+
+  // ISSUES 生成。
+  const issuesDoc = mergeFindings(findingsDoc, mergeTexts);
+  debug("issuesDoc", issuesDoc);
+
+  // 検証。
+  const verdicts = await llmVerifyIssues(issuesDoc.issues, diffText, summary, {
+    query,
+    debug,
+  });
+  debug("verdicts", verdicts);
+
+  // FINAL 生成。
+  const final = applyVerdicts(issuesDoc, verdicts);
+  debug("final", final);
+
+  return final;
+}
+
+function makeDebugSink(enabled: boolean): DebugSink {
+  return enabled
+    ? (label, obj) => {
+        process.stderr.write(
+          `[debug] ${label}:\n${JSON.stringify(obj, null, 2)}\n`,
+        );
+      }
+    : () => {};
+}
+
+export async function runLocalReview(
+  opts: CollectContextOpts,
+  runOpts: { debug: boolean },
+  deps: PipelineDeps = {},
+): Promise<PipelineResult> {
+  const exec = deps.exec ?? execFileAsync;
+  const query = deps.query;
+  const readFile = deps.readFile ?? defaultReadFile;
+  const debug = makeDebugSink(runOpts.debug);
+
+  const ctx = await collectContext(opts, { exec });
+  debug("ctx", ctx);
+
+  // 著者意図情報。staged はコミットが無いため diff のみの固定文言、それ以外（range）は
   // git log。ctx.range が無い、または git log が空ならフォールバックする。
   let authorInfo: string;
   if (ctx.source === "staged") {
@@ -105,61 +196,72 @@ export async function runLocalReview(
     authorInfo = `（コミットメッセージなし）${DIFF_ONLY_AUTHOR_INFO}`;
   }
 
-  // 4. サマリ + クラスタ分割案。
-  const { summary, rawClusters } = await llmSummaryAndClusters(
-    ctx,
-    diffText,
-    authorInfo,
-    {
-      query,
-      debug,
-    },
-  );
-  debug("summary", summary);
-
-  // 5. clusters 確定。normal のみ LLM 出力を検証、それ以外は決定論的縮退。
-  const clustersDoc =
-    ctx.tier === "normal"
-      ? validateClusters(rawClusters, ctx.changedFiles)
-      : tierReducedClusters(ctx.changedFiles);
-  debug("clustersDoc", clustersDoc);
-
-  // 6. レビューエージェント（agent1〜5）。
-  const rawFindings = await llmReviewAgents(
-    { ctx, diffText, clusters: clustersDoc.clusters, summary },
-    { query, readFile, debug },
-  );
-
-  // 7. finding 機械処理。
-  const findingsDoc = processFindings(rawFindings, { ctx, diffText });
-  debug("findingsDoc", findingsDoc);
-
-  // 8. step4b スキップ（Phase 4 では未解決アンカー再解決を行わない）: unresolved 件数のみ
-  // debug 出力する。将来的には retryUnresolvedAnchors(findingsDoc, diffText, ctx) を呼び、
-  // LLM に existingCode を再出力させて processFindings(patch, {ctx, diffText, prev: findingsDoc})
-  // を1回呼ぶ形になる（この関数境界はまだ実装していない）。
-  if (findingsDoc.stats.unresolved > 0) {
-    debug("unresolved-skip", { unresolved: findingsDoc.stats.unresolved });
-  }
-
-  // 9. 統合文章作成。
-  const mergeTexts = await llmMergeTexts(findingsDoc, { query, debug });
-  debug("mergeTexts", mergeTexts);
-
-  // 10. ISSUES 生成。
-  const issuesDoc = mergeFindings(findingsDoc, mergeTexts);
-  debug("issuesDoc", issuesDoc);
-
-  // 11. 検証。
-  const verdicts = await llmVerifyIssues(issuesDoc.issues, diffText, summary, {
+  const final = await runReviewCore(ctx, authorInfo, false, {
+    exec,
     query,
+    readFile,
     debug,
   });
-  debug("verdicts", verdicts);
-
-  // 12. FINAL 生成。
-  const final = applyVerdicts(issuesDoc, verdicts);
-  debug("final", final);
 
   return { final, ctx };
+}
+
+export async function runPrReview(
+  pr: string,
+  runOpts: { debug: boolean; comment: boolean },
+  deps: PipelineDeps = {},
+): Promise<PrReviewResult> {
+  const exec = deps.exec ?? execFileAsync;
+  const query = deps.query;
+  const readFile = deps.readFile ?? defaultReadFile;
+  const debug = makeDebugSink(runOpts.debug);
+
+  // step0: PR メタ取得（headRefOid・baseRefOid・baseRefName を含む。gh pr view の
+  // 重複呼び出しを避ける。collectContext の PR モードにも baseRef として渡す）。
+  const meta = await fetchPrMeta(pr, { exec });
+  debug("prMeta", meta);
+
+  // step0: ローカル HEAD と PR HEAD の一致ゲート。LLM コストを一切かける前に確認する。
+  await assertPrHeadMatches(pr, meta.headRefOid, { exec });
+
+  const ctx = await collectContext(
+    {
+      mode: "pr",
+      pr,
+      baseRef: { baseRefOid: meta.baseRefOid, baseRefName: meta.baseRefName },
+    },
+    { exec },
+  );
+  debug("ctx", ctx);
+
+  const authorInfo = formatPrAuthorInfo(meta);
+
+  const final = await runReviewCore(ctx, authorInfo, ctx.tier === "tiny", {
+    exec,
+    query,
+    readFile,
+    debug,
+  });
+
+  if (!runOpts.comment) {
+    return { final, ctx, headRefOid: meta.headRefOid };
+  }
+
+  const nameWithOwner = await getNameWithOwner({ exec });
+  const postInput = await llmCommentBodies(
+    final,
+    { prHeadSha: meta.headRefOid, nameWithOwner },
+    { query, debug },
+  );
+  debug("postInput", postInput);
+  const postedUrl = await postReview({
+    pr,
+    nameWithOwner,
+    postInput,
+    final,
+    commitId: meta.headRefOid,
+    exec,
+  });
+
+  return { final, ctx, postedUrl, headRefOid: meta.headRefOid };
 }

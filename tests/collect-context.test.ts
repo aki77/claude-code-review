@@ -473,6 +473,20 @@ describe("resolvePrBaseRange", () => {
     };
     await expect(resolvePrBaseRange("7", { exec })).rejects.toThrow();
   });
+
+  it("baseRef 指定時は gh pr view を呼ばない（重複呼び出し回避）", async () => {
+    const calls: { cmd: string; args: string[] }[] = [];
+    const exec: Stub = async (cmd, args) => {
+      calls.push({ cmd, args });
+      return { stdout: "", stderr: "", code: 0 };
+    };
+    const result = await resolvePrBaseRange("7", {
+      exec,
+      baseRef: { baseRefOid: "abc123", baseRefName: "main" },
+    });
+    expect(result).toBe("abc123...HEAD");
+    expect(calls.some((c) => c.cmd === "gh")).toBe(false);
+  });
 });
 
 // Rule 型を明示的に使う型検証（未使用 import 警告を避けつつ、収集ルール定義の形が

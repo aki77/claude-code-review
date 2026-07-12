@@ -11,19 +11,41 @@
 ## 作業内容
 
 ### step0: PR HEAD 一致確認（`pr-review/SKILL.md:12-16`）
-- `gh pr view <n> --json headRefOid` と ローカル HEAD（`git rev-parse HEAD`）を比較。
-- 不一致なら無条件終了（ローカルがレビュー対象コミットと一致していない）。
+- `gh pr view <n> --json title,body,commits,headRefOid,baseRefOid,baseRefName` を1回呼び
+  （`fetchPrMeta` に統合。`resolvePrBaseRange` が別途必要とする baseRefOid/baseRefName も
+  同時に取得することで `gh pr view` の重複呼び出しを完全に避ける）、取得した `headRefOid` と
+  ローカル HEAD（`git rev-parse HEAD`）を比較。
+- 不一致なら無条件終了（ローカルがレビュー対象コミットと一致していない）。LLM コストを一切
+  かける前にゲートする。
 
 ### step1 の PR モード（Phase 2 の collect-context 拡張）
-- `resolvePrBaseRange`（`gh pr view` の baseRefOid → `<base>...HEAD`）を使い CTX を構築。
+- `resolvePrBaseRange`（`fetchPrMeta` が取得した baseRefOid/baseRefName を `baseRef` として
+  受け取り `<base>...HEAD` を組む。渡されなければ後方互換で `gh pr view` を呼ぶ）を使い
+  CTX を構築。
 - サマリ入力に PR タイトル・説明文・コミットを含める（local と異なり著者意図が PR にある）。
-- pr-review 特有: agent1/2/3/5 は step2 と並列可、agent4 のみ step2 完了待ち（`pr-review/SKILL.md:27`）。tiny 時 summary 起動しない（意図は PR タイトル/説明で代替、`:28`）。
+- 並列起動は意図的に省略（結果同一）: SKILL は「agent1/2/3/5 は step2 と並列、agent4 のみ
+  step2 待ち」を求めるが、既存 `llmReviewAgents` は step2 完了後に全 agent を `Promise.all` で
+  起動する構造で、最終結果は同一・agent4 はどのみち clusters を待つ。テスト済み関数をフォーク
+  するコストに見合わないため意図的にスキップした。
+- tiny-PR は summary 呼び出しを省き PR タイトル/説明を summary に流す: tier=tiny の PR では
+  サマリ LLM 呼び出しをスキップし（`runReviewCore` の `skipSummaryAgent`）、`formatPrAuthorInfo`
+  が組んだ PR タイトル/説明文をそのまま `summary` としてレビュー agent に渡す。LLM 1回分の
+  コスト削減。
 
 ### step9: コメント本文作成（`--comment` 時のみ, `pr-review/SKILL.md:39-49`）
-- `llmCommentBodies(finalIssues)`: confirmed かつ resolved:true の issue ごとに `{ id, commentBody, suggestion?, deleteLines? }` を生成。
-  - 本文先頭に `[category · severity]` バッジ、引用元リンク。
-  - suggestion は小規模・自己完結・単一 finding 由来のみ。
+- `llmCommentBodies(final, {prHeadSha, nameWithOwner})`: 区分けは TS が行う
+  （`inlineable = final.issues.filter(i => i.resolved)` / `deferred = filter(i => !i.resolved)`）。
+  `inlineable` が0件なら LLM を呼ばず TS 生成の summaryBody のみ返す。
+- LLM には各 issue ごとに `{ id, commentBody, suggestion?, deleteLines? }` の文章のみを書かせる。
+  `[category · severity]` バッジと引用元パーマリンク（`https://github.com/{nameWithOwner}/blob/
+  {prHeadSha}/{path}#L{line}`）は LLM に書かせず TS で commentBody 先頭に機械付与する
+  （設計原則「構造転写はコード」。行番号/sha を LLM に触らせない）。
+  - suggestion は小規模・自己完結・単一 finding 由来のみ。`sourceFindingIds.length !== 1` の
+    issue は suggestion/deleteLines を TS で剥がす（`buildSuggestionBody` の複数メンバーガードと
+    二重防御）。
   - resolved:false の confirmed はインライン化せずサマリ本文で言及。
+  - 黙殺防止: LLM が出力を欠落させた inlineable issue には title/body から TS が最小
+    commentBody を合成する（`buildPayload` の黙殺防止 throw が落ちないことを保証）。
 
 ### step10: 投稿（`post-review.ts` 使用）
 - `toComment` で params → REST snake_case。

@@ -9,17 +9,24 @@ import type {
   Assignment,
   Cluster,
   Context,
+  FinalDoc,
   FindingsDoc,
   Issue,
   MergeText,
+  PostReviewComment,
+  PostReviewInput,
   Verdict,
 } from "../lib/types.ts";
+import { formatBadge } from "../report.ts";
 import { type QueryFn, runStructured } from "./client.ts";
 import {
   bugAgentSystem,
   bugAgentUser,
+  COMMENT_BODIES_SCHEMA,
   clusterAgentSystem,
   clusterAgentUser,
+  commentBodiesSystem,
+  commentBodiesUser,
   FINDINGS_SCHEMA,
   MERGE_TEXT_SCHEMA,
   MODEL_HEAVY,
@@ -420,4 +427,110 @@ export async function llmVerifyIssues(
   );
 
   return results.filter((v): v is Verdict => v !== null);
+}
+
+// ---- step9: PR コメント本文作成 ------------------------------------------------
+
+export interface CommentBodiesInput {
+  prHeadSha: string;
+  nameWithOwner: string;
+}
+
+// category/severity バッジ（report.ts の formatBadge と共通）とパーマリンクを
+// commentBody 先頭に付与する。行番号/sha を LLM に触らせず TS で機械付与する
+// （設計原則「構造転写はコード」）。
+function decorateCommentBody(issue: Issue, input: CommentBodiesInput): string {
+  const badge = formatBadge(issue);
+  const line =
+    issue.params && "line" in issue.params ? issue.params.line : undefined;
+  const permalink =
+    line !== undefined
+      ? `https://github.com/${input.nameWithOwner}/blob/${input.prHeadSha}/${issue.path}#L${line}`
+      : undefined;
+  const header = permalink ? `${badge} [${issue.path}](${permalink})` : badge;
+  return `${header}\n\n`;
+}
+
+// issue.sourceFindingIds.length !== 1 の issue は suggestion/deleteLines を剥がす
+// （複数メンバー統合 issue は existingCode が範囲全体を表さない。buildSuggestionBody の
+// post-review.ts:88 ガードと二重防御し「自動判定」注記ノイズを避ける）。
+function stripSuggestionIfMerged(
+  issue: Issue,
+  comment: PostReviewComment,
+): PostReviewComment {
+  if (issue.sourceFindingIds.length === 1) return comment;
+  const { suggestion, deleteLines, ...rest } = comment;
+  return rest;
+}
+
+// deferred（resolved:false）issue をサマリ本文へ機械的に言及する文言を生成する
+// （inlineable が0件で LLM を呼ばないときに使う）。
+function formatDeferredSummary(deferred: Issue[]): string {
+  if (deferred.length === 0) return "問題は見つかりませんでした。";
+  const lines = deferred.map(
+    (issue) => `- ${formatBadge(issue)} ${issue.path}  ${issue.title}`,
+  );
+  return [
+    "以下の課題は行番号を確定できず、インライン投稿できませんでした。",
+    ...lines,
+  ].join("\n");
+}
+
+export async function llmCommentBodies(
+  final: FinalDoc,
+  input: CommentBodiesInput,
+  deps: StepDeps = {},
+): Promise<PostReviewInput> {
+  const queryFn = deps.query;
+  const debug = deps.debug;
+
+  const inlineable = final.issues.filter((i) => i.resolved);
+  const deferred = final.issues.filter((i) => !i.resolved);
+
+  if (inlineable.length === 0) {
+    return { summaryBody: formatDeferredSummary(deferred), comments: [] };
+  }
+
+  const raw = await runAgentSafe<PostReviewInput>(
+    "commentBodies",
+    async () => {
+      const result = await runStructured<PostReviewInput>(
+        {
+          system: commentBodiesSystem(),
+          user: commentBodiesUser({ inlineable, deferred }),
+          model: MODEL_LIGHT,
+          schema: COMMENT_BODIES_SCHEMA,
+        },
+        { query: queryFn },
+      );
+      return {
+        data: result.data,
+        usage: result.usage,
+        totalCostUsd: result.totalCostUsd,
+      };
+    },
+    { summaryBody: "", comments: [] },
+    debug,
+  );
+
+  const byId = new Map(raw.comments.map((c) => [c.id, c]));
+
+  // 黙殺防止: LLM が欠落させた inlineable issue には title/body から最小 commentBody を
+  // TS 合成する（buildPayload の post-review.ts:213 黙殺防止 throw が落ちないことを保証）。
+  const comments: PostReviewComment[] = inlineable.map((issue) => {
+    const c = byId.get(issue.id) ?? {
+      id: issue.id,
+      commentBody: issue.body || issue.title,
+    };
+    const decorated: PostReviewComment = {
+      ...c,
+      commentBody: `${decorateCommentBody(issue, input)}${c.commentBody}`,
+    };
+    return stripSuggestionIfMerged(issue, decorated);
+  });
+
+  return {
+    summaryBody: raw.summaryBody || formatDeferredSummary(deferred),
+    comments,
+  };
 }
