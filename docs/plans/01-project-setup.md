@@ -23,6 +23,8 @@ TypeScript + ESM + vitest のプロジェクト骨格を用意し、`node dist/c
 - `"module": "nodenext"`, `"moduleResolution": "nodenext"`, `"target": "es2022"`。
 - `"strict": true`, `"noUncheckedIndexedAccess": true`（配列アクセス安全化）。
 - `"outDir": "dist"`, `"rootDir": "src"`。
+- `"types": ["node"]`（TypeScript 7 のネイティブ移植版 `tsc` では `@types/*` の自動包含が
+  効かず、`process` 等のグローバル型が解決できないため明示指定が必要。TS5 時代は不要だった）。
 
 ### ディレクトリ骨格
 ```
