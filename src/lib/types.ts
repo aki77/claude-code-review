@@ -104,3 +104,92 @@ export interface FindingsDoc {
   groups: Group[];
   stats: Stats;
 }
+
+// ---- validate-clusters 関連 ------------------------------------------------
+
+export interface Cluster {
+  id: number;
+  theme: string;
+  changedFiles: string[];
+  symbols: string[];
+  contextHints: string[];
+}
+
+export interface ClustersDoc {
+  clusters: Cluster[];
+  fallback: boolean;
+  removedPaths: string[];
+  appendedPaths: string[];
+  /** tierReducedClusters が生成した縮退のときだけ true（壊れ入力の fallback と区別）。 */
+  tierReduced?: boolean;
+}
+
+// ---- merge-findings 関連 ---------------------------------------------------
+
+export interface MergeText {
+  groupId: string;
+  title: string;
+  body: string;
+}
+
+export interface Issue {
+  id: string;
+  path: string;
+  kind: Kind;
+  category: Category | undefined;
+  severity: Severity | undefined;
+  title: string;
+  body: string;
+  ruleRefs: string[];
+  existingCode?: string;
+  resolved: boolean;
+  sourceFindingIds: string[];
+  /** resolved のときのみ設定。 */
+  params?: Params;
+  /** 未 resolved かつ reason があるときのみ設定。 */
+  reason?: string;
+}
+
+export interface MergeStats {
+  groups: number;
+  issues: number;
+  merged: number;
+  resolved: number;
+  unresolved: number;
+}
+
+export interface IssuesDoc {
+  issues: Issue[];
+  stats: MergeStats;
+}
+
+// ---- apply-verdicts 関連 ----------------------------------------------------
+
+export type VerdictKind = "confirmed" | "rejected";
+
+export interface Verdict {
+  id: string;
+  verdict: VerdictKind;
+  reason?: string;
+}
+
+export interface RejectedIssue {
+  id: string;
+  path: string;
+  title: string;
+  reason: string;
+}
+
+export interface FinalStats {
+  total: number;
+  confirmed: number;
+  rejected: number;
+  unverified: number;
+}
+
+export interface FinalDoc {
+  issues: Issue[];
+  rejected: RejectedIssue[];
+  unverified: string[];
+  stats: FinalStats;
+}
