@@ -25,6 +25,11 @@ pnpm format  # biome check --write（自動修正）
 - **行番号は LLM に推測させない**。LLM は diff 中の実在コード片 `existingCode` だけを
   出力し、行番号は `resolveAnchor`（`src/lib/diff-anchor.ts`）で機械的に確定する。
 - 成果物はメモリ上のオブジェクトで各ステップ間を受け渡す（一時ファイル経由にしない）。
+- **LLM ステップは既定 `allowedTools: []`（ツール不可のワンショット）**。ただし
+  read-only ツール（Read/Grep/Glob）は持たせてよい方針で、検証(step6)・agent4
+  （クロスファイル参照）は実コードに当たって判断する必要があるため明示的に許可している
+  （`src/llm/client.ts` の `RunStructuredOpts.allowedTools`）。write 系ツールは
+  一切許可しない（作業ツリーを変更しない）。
 
 ## 認証方針（重要な制約）
 
@@ -40,7 +45,7 @@ processFindings → LLMマージ → mergeFindings → LLM検証 → applyVerdic
 
 - `src/cli.ts`: 引数パース・ディスパッチのみ。実装ロジックは書かない。
 - `src/lib/`: 決定論ロジック（git/gh 呼び出し、diff アンカー解決、finding 処理など）。
-- `src/llm/`: LLM 呼び出しステップ（Phase 4 で実装予定、現状 `.gitkeep` のみ）。
+- `src/llm/`: LLM 呼び出しステップ本体（`client.ts`/`prompts.ts`/`steps.ts`）。実装済み。
 - `src/lib/types.ts`: Finding/Group/Ctx 等のデータ契約。既存 `.mjs` 実装のフィールド名を
   変えずに移植すること（回帰防止のため）。
 

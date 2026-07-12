@@ -5,6 +5,7 @@ import type {
   FindingsDoc,
   Issue,
 } from "../src/lib/types.ts";
+import { READ_ONLY_TOOLS } from "../src/llm/prompts.ts";
 import {
   llmCommentBodies,
   llmMergeTexts,
@@ -155,6 +156,32 @@ describe("llmReviewAgents", () => {
     );
     // agent3 + agent4×2クラスタ = 3回（agent1/2 は assignments 空で非起動）。
     expect(calls.length).toBe(3);
+  });
+
+  it("agent4 は read-only ツール（Read/Grep/Glob）を許可して呼び出す", async () => {
+    const calls: { prompt: unknown; options: unknown }[] = [];
+    const query = makeFakeQuery({ findings: [] }, { calls });
+    const ctx = baseCtx({
+      tier: "normal",
+      assignments: [{ files: [] }, { files: [] }],
+    });
+    const clusters = [
+      {
+        id: 1,
+        theme: "T1",
+        changedFiles: ["a.ts"],
+        symbols: [],
+        contextHints: [],
+      },
+    ];
+    await llmReviewAgents(
+      { ctx, diffText: "diff", clusters, summary: null },
+      { query, readFile: () => null },
+    );
+    // agent3（diff限定・ツール無し）+ agent4（cluster、ツール許可）の2回。
+    expect(calls).toHaveLength(2);
+    const agent4Options = calls[1]?.options as { allowedTools?: string[] };
+    expect(agent4Options.allowedTools).toEqual([...READ_ONLY_TOOLS]);
   });
 
   it("REVIEW.md が存在すれば agent5 が起動する", async () => {
@@ -338,6 +365,18 @@ describe("llmVerifyIssues", () => {
       query,
     });
     expect(result).toEqual([]);
+  });
+
+  it("read-only ツール（Read/Grep/Glob）を許可して呼び出す", async () => {
+    const calls: { prompt: unknown; options: unknown }[] = [];
+    const query = makeFakeQuery(
+      { verdict: "confirmed", reason: "根拠" },
+      { calls },
+    );
+    await llmVerifyIssues([baseIssue()], "diff", "summary", { query });
+    expect(calls).toHaveLength(1);
+    const options = calls[0]?.options as { allowedTools?: string[] };
+    expect(options.allowedTools).toEqual([...READ_ONLY_TOOLS]);
   });
 });
 

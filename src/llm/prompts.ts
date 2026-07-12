@@ -1,16 +1,38 @@
 // LLM ステップ（step2/3/5/6）向けのプロンプトテンプレートと JSON Schema。
 //
 // 副作用なし・ファイル I/O なしの純関数のみを置く。
-// ツール禁止（runStructured は allowedTools: []）への対処として、rules 本文・REVIEW.md・
+// 大半のステップは allowedTools: []（ツール不可）のワンショットで、rules 本文・REVIEW.md・
 // contextHints ファイルなど「埋め込み済み文字列」を受け取ってテンプレートへ差し込むだけに
 // 徹する。ファイルの読み込みは steps.ts が行う。
+// 例外: 検証(step6)・agent4（クロスファイル参照）は read-only ツール（Read/Grep/Glob）の
+// 使用を前提にプロンプトを書く（steps.ts が allowedTools を明示的に渡す）。
 import type { Cluster, Issue, JSONSchema } from "../lib/types.ts";
+
+// ---- 誤検知除外リスト（元プラグイン shared/review-core.md 由来） -------------
+// 元プラグインはステップ3・6の両方に適用していたが、本再実装では検証(step6)にのみ
+// 集約する: 発見段階（agent1-5）は幅広く拾い、確度の担保は検証エージェントが
+// read-only ツールで実コードに当たって行う（「既存問題か」「lint 類か」を実際に確認できる）。
+export const FALSE_POSITIVE_EXCLUSIONS =
+  "次に該当するものは誤検知として rejected にしてください:\n" +
+  "- レビュー対象の変更より前から存在する問題（今回の変更が持ち込んだものではない）\n" +
+  "- バグに見えるが実際は正しい挙動\n" +
+  "- シニアエンジニアであれば指摘しないような細かすぎる指摘\n" +
+  "- リンタが検出する類の問題（リンタを実際に走らせて検証する必要はない）\n" +
+  "- プロジェクトルールで明示的に求められていない、一般的なコード品質の懸念" +
+  "（テストカバレッジ不足、一般的なセキュリティ懸念など）\n" +
+  "- プロジェクトルールに記載があっても、コード側で明示的に抑制されている事項" +
+  "（lint の ignore コメントなど）";
 
 // ---- モデルエイリアス定数 ----------------------------------------------------
 // runStructured の model はそのまま SDK query() → claude CLI へ渡る（client.ts）。
 // CLI が sonnet/opus エイリアスを解決するのでフルモデル ID をハードコードしない。
 export const MODEL_LIGHT = "sonnet"; // agent1/2/5・rule 検証
 export const MODEL_HEAVY = "opus"; // agent3/4・bug 検証
+
+// read-only ツール一式（Read/Grep/Glob）。実コードに当たって判断する必要がある
+// ステップ（検証(step6)・agent4 のクロスファイル参照）だけがこれを allowedTools に渡す。
+// steps.ts の2箇所で同じ配列をベタ書きせず、ここを単一の情報源にする。
+export const READ_ONLY_TOOLS = ["Read", "Grep", "Glob"] as const;
 
 // ---- JSON Schema 定数 --------------------------------------------------------
 
@@ -279,7 +301,8 @@ export function clusterAgentSystem(): string {
     "あなたはバグ検出／クロスファイル整合性チェックを専門とするレビューエージェントです。" +
     "担当クラスタの changedFiles に導入された問題（セキュリティ問題、ロジック誤り、" +
     "クロスファイル整合性の崩れなど）を探してください。\n" +
-    "diff と埋め込みコンテキスト以外は参照できません。不足していて確信が持てない場合は" +
+    "diff と埋め込みコンテキストに加え、Read/Grep/Glob ツールで呼び出し元・関連定義・" +
+    "テストなど diff 外のファイルも必要に応じて確認してよい。それでも確信が持てない場合は" +
     "指摘しないこと。\n" +
     "確認observation の例:\n" +
     "- 変更したメソッド/関数のシグネチャ変更が、呼び出し側と整合しているか\n" +
@@ -380,9 +403,12 @@ export function mergeTextUser({
 export function verifySystem(): string {
   return (
     "あなたは提示された課題が高い確度で実際の問題であるかを検証するレビューエージェントです。\n" +
+    "Read/Grep/Glob ツールを使って対象ファイルの実コードを確認し、既存の挙動・呼び出し元・型定義を" +
+    "踏まえて判定してください。ツールを使わず issue の説明文だけで判定しないこと。\n" +
     "例えば「変数が未定義」と指摘された場合、コード上で実際にそれが正しいかを確認してください。\n" +
     "プロジェクトルール違反の場合、適用スコープは確定済みのため、その範囲内で実際に違反しているかのみを" +
     "検証してください。\n" +
+    `${FALSE_POSITIVE_EXCLUSIONS}\n\n` +
     "実際の問題だと高い確度で確認できたら confirmed、そうでなければ rejected を返してください。" +
     "reason には判定の根拠を1〜2文で書いてください。"
   );
@@ -413,7 +439,9 @@ export function verifyUser({
     `title: ${issue.title}\n` +
     `body: ${issue.body}` +
     lineInfo +
-    "\n\nこの課題が実際の問題かどうかを検証し、verdict と reason を返してください。"
+    `\n\nまず Read ツールで ${issue.path} を読み、必要なら Grep/Glob で呼び出し元や関連定義も` +
+    "確認してください。そのうえでこの課題が実際の問題かどうかを検証し、verdict と reason を" +
+    "返してください。"
   );
 }
 

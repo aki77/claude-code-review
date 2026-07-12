@@ -4,6 +4,7 @@ import {
   bugAgentUser,
   clusterAgentSystem,
   clusterAgentUser,
+  FALSE_POSITIVE_EXCLUSIONS,
   FINDINGS_SCHEMA,
   MERGE_TEXT_SCHEMA,
   MODEL_HEAVY,
@@ -124,9 +125,9 @@ describe("bugAgentSystem/User", () => {
 });
 
 describe("clusterAgentSystem/User", () => {
-  it("diff と埋め込みコンテキスト以外は参照不可を明記する", () => {
+  it("read-only ツールで diff 外ファイルも確認してよい旨を明記する", () => {
     const sys = clusterAgentSystem();
-    expect(sys).toContain("diff と埋め込みコンテキスト以外は参照");
+    expect(sys).toContain("Read/Grep/Glob");
     const user = clusterAgentUser({
       cluster: {
         id: 1,
@@ -214,6 +215,26 @@ describe("verifySystem/User", () => {
       summary: null,
     });
     expect(user).toContain("サマリなし");
+  });
+
+  it("read-only ツールで実コードを確認する指示を含む", () => {
+    const sys = verifySystem();
+    expect(sys).toContain("Read");
+    expect(sys).toContain("Grep");
+
+    const user = verifyUser({
+      issue: { path: "a.ts", kind: "bug", title: "t", body: "b" },
+      summary: null,
+    });
+    expect(user).toContain("Read ツール");
+    expect(user).toContain("a.ts");
+  });
+
+  it("誤検知除外リスト（既存問題・lint類・ルール外の一般論など）を含む", () => {
+    const sys = verifySystem();
+    expect(sys).toContain(FALSE_POSITIVE_EXCLUSIONS);
+    expect(sys).toContain("既存");
+    expect(sys).toContain("リンタ");
   });
 });
 

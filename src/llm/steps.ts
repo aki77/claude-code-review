@@ -38,6 +38,7 @@ import {
   MODEL_LIGHT,
   mergeTextSystem,
   mergeTextUser,
+  READ_ONLY_TOOLS,
   reviewMdAgentSystem,
   reviewMdAgentUser,
   ruleAgentSystem,
@@ -108,9 +109,10 @@ async function runFindingsAgent(
   user: string,
   model: string,
   queryFn: QueryFn | undefined,
+  allowedTools?: string[],
 ): Promise<RunStructuredResult<unknown[]>> {
   const result = await runStructured<{ findings: unknown[] }>(
-    { system, user, model, schema: FINDINGS_SCHEMA },
+    { system, user, model, schema: FINDINGS_SCHEMA, allowedTools },
     { query: queryFn },
   );
   return { ...result, data: result.data.findings };
@@ -263,7 +265,8 @@ export async function llmReviewAgents(
   );
 
   // agent4: バグ検出／クロスファイル整合性チェック。各クラスタ1インスタンス並列。
-  // contextHints の存在するファイル本文のみ埋め込む。
+  // contextHints のファイル本文は起点ヒントとして埋め込みつつ、それ以外の diff 外
+  // ファイルも read-only ツール（Read/Grep/Glob）で能動的に参照できるようにする。
   for (const cluster of clusters) {
     tasks.push(
       runAgentSafe(
@@ -284,6 +287,7 @@ export async function llmReviewAgents(
             }),
             MODEL_HEAVY,
             queryFn,
+            [...READ_ONLY_TOOLS],
           );
         },
         [],
@@ -383,9 +387,11 @@ export async function llmMergeTexts(
 
 // ---- step6: 検証 --------------------------------------------------------------
 
+// 検証は allowedTools:["Read","Grep","Glob"] で issue.path を実際に読ませる方式にしたため
+// diff テキストの埋め込みは不要（verifyUser が Read ツールでの確認を指示する）。
 export async function llmVerifyIssues(
   issues: Issue[],
-  // biome-ignore lint/correctness/noUnusedFunctionParameters: 呼び出し側 API 互換のため保持（既存実装、未使用理由は未調査）
+  // biome-ignore lint/correctness/noUnusedFunctionParameters: 呼び出し側 API 互換のため保持
   diffText: string,
   summary: string | null,
   deps: StepDeps = {},
@@ -414,6 +420,9 @@ export async function llmVerifyIssues(
               user: verifyUser({ issue, summary }),
               model,
               schema: VERDICT_SCHEMA,
+              // 検証は「実際に問題か」をコードに当たって判断する必要があるため、
+              // read-only ツールを許可する（書き込み系は一切許可しない）。
+              allowedTools: [...READ_ONLY_TOOLS],
             },
             { query: queryFn },
           );

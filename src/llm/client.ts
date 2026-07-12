@@ -10,6 +10,11 @@
 // system prompt での JSON 強制 + パースにフォールバックする。
 // system prompt は claude_code プリセットを土台にし、JSON 強制指示を含むレビュー本文は
 // append で末尾に載せる。
+//
+// ツール方針: allowedTools は既定 []（LLM はコードを一切参照しないワンショット）。
+// read-only ツール（Read/Grep/Glob）は持たせてよい方針のため、実コードに当たって
+// 判断すべきステップ（検証(step6)・agent4 のクロスファイル参照）だけが opts.allowedTools
+// で明示的に許可を渡す。write 系ツールは一切許可しない（作業ツリーは変更しない）。
 
 import type {
   ModelUsage,
@@ -23,6 +28,10 @@ export interface RunStructuredOpts {
   user: string;
   model?: string;
   schema?: JSONSchema;
+  // read-only ツール（Read/Grep/Glob 等）の許可リスト。省略時は [] を維持し、
+  // 他ステップの決定論性（LLM はコード非参照のワンショット）を崩さない。
+  // 検証(step6)・agent4 など、実コードに当たって判断すべきステップのみ明示的に渡す。
+  allowedTools?: string[];
 }
 
 export interface RunStructuredResult<T> {
@@ -71,7 +80,7 @@ export async function runStructured<T>(
 ): Promise<RunStructuredResult<T>> {
   const queryFn = deps?.query ?? query;
   const options: Parameters<QueryFn>[0]["options"] = {
-    allowedTools: [],
+    allowedTools: opts.allowedTools ?? [],
     settingSources: [],
     permissionMode: "default",
     systemPrompt: {
