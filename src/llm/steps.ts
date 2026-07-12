@@ -387,11 +387,12 @@ export async function llmMergeTexts(
 
 // ---- step6: 検証 --------------------------------------------------------------
 
-// 検証は allowedTools:["Read","Grep","Glob"] で issue.path を実際に読ませる方式にしたため
-// diff テキストの埋め込みは不要（verifyUser が Read ツールでの確認を指示する）。
+// 検証は allowedTools:["Read","Grep","Glob"] で issue.path を実際に読ませる方式だが、
+// read-only ツールは変更後の作業ツリーしか見えず「変更より前から存在する問題」を
+// 判定できない。そのため issue.path に絞った diff を verifyUser に埋め込み、
+// 今回の変更が持ち込んだ問題かどうかを diff で判断できるようにする。
 export async function llmVerifyIssues(
   issues: Issue[],
-  // biome-ignore lint/correctness/noUnusedFunctionParameters: 呼び出し側 API 互換のため保持
   diffText: string,
   summary: string | null,
   deps: StepDeps = {},
@@ -403,6 +404,7 @@ export async function llmVerifyIssues(
   const results = await Promise.all(
     issues.map(async (issue) => {
       const model = issue.kind === "bug" ? MODEL_HEAVY : MODEL_LIGHT;
+      const issueDiff = filterDiffByFiles(diffText, [issue.path]);
       // 失敗 issue の縮退: その verdict を配列に含めない → applyVerdicts が自動的に
       // unverified にする。runAgentSafe に null フォールバックを渡し、後段でフィルタする。
       const verdict = await runAgentSafe<{
@@ -417,7 +419,7 @@ export async function llmVerifyIssues(
           }>(
             {
               system: verifySystem(),
-              user: verifyUser({ issue, summary }),
+              user: verifyUser({ issue, summary, diffText: issueDiff }),
               model,
               schema: VERDICT_SCHEMA,
               // 検証は「実際に問題か」をコードに当たって判断する必要があるため、

@@ -204,6 +204,7 @@ describe("verifySystem/User", () => {
         params: { line: 5, side: "RIGHT", subjectType: "LINE" },
       },
       summary: "サマリ",
+      diffText: "diff --git a/a.ts b/a.ts\n+foo",
     });
     expect(user).toContain("a.ts");
     expect(user).toContain("line");
@@ -213,6 +214,7 @@ describe("verifySystem/User", () => {
     const user = verifyUser({
       issue: { path: "a.ts", kind: "rule", title: "t", body: "b" },
       summary: null,
+      diffText: "diff --git a/a.ts b/a.ts\n+foo",
     });
     expect(user).toContain("サマリなし");
   });
@@ -225,9 +227,28 @@ describe("verifySystem/User", () => {
     const user = verifyUser({
       issue: { path: "a.ts", kind: "bug", title: "t", body: "b" },
       summary: null,
+      diffText: "diff --git a/a.ts b/a.ts\n+foo",
     });
     expect(user).toContain("Read ツール");
     expect(user).toContain("a.ts");
+  });
+
+  it("diffText を渡すとプロンプトに差分が含まれる", () => {
+    const user = verifyUser({
+      issue: { path: "a.ts", kind: "bug", title: "t", body: "b" },
+      summary: null,
+      diffText: "diff --git a/a.ts b/a.ts\n+added line",
+    });
+    expect(user).toContain("added line");
+  });
+
+  it("diffText が空のとき参照コンテキストなし文言を含む", () => {
+    const user = verifyUser({
+      issue: { path: "a.ts", kind: "bug", title: "t", body: "b" },
+      summary: null,
+      diffText: "",
+    });
+    expect(user).toContain("参照コンテキストなし");
   });
 
   it("誤検知除外リスト（既存問題・lint類・ルール外の一般論など）を含む", () => {

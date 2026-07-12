@@ -417,6 +417,7 @@ export function verifySystem(): string {
 export function verifyUser({
   issue,
   summary,
+  diffText,
 }: {
   issue: {
     path: string;
@@ -426,6 +427,7 @@ export function verifyUser({
     params?: unknown;
   };
   summary: string | null;
+  diffText: string;
 }): string {
   const lineInfo =
     issue.params && typeof issue.params === "object" && "line" in issue.params
@@ -439,9 +441,12 @@ export function verifyUser({
     `title: ${issue.title}\n` +
     `body: ${issue.body}` +
     lineInfo +
-    `\n\nまず Read ツールで ${issue.path} を読み、必要なら Grep/Glob で呼び出し元や関連定義も` +
-    "確認してください。そのうえでこの課題が実際の問題かどうかを検証し、verdict と reason を" +
-    "返してください。"
+    `\n\n## 検証対象の差分（このファイル）\n${diffText || NO_CONTEXT_NOTE}\n\n` +
+    `まず上記の差分で今回の変更が実際に何を変えたか（追加/削除行）を確認し、` +
+    `そのうえで Read ツールで ${issue.path} を読み、必要なら Grep/Glob で呼び出し元や` +
+    "関連定義も確認してください。指摘が今回の変更で持ち込まれたものか、変更より前から" +
+    "存在するものかは差分で判断してください。そのうえでこの課題が実際の問題かどうかを" +
+    "検証し、verdict と reason を返してください。"
   );
 }
 
