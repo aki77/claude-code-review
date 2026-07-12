@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { formatSummary } from "../src/report.ts";
 import type { Context, FinalDoc, Issue } from "../src/lib/types.ts";
+import { formatSummary } from "../src/report.ts";
 
 function baseCtx(overrides: Partial<Context> = {}): Context {
   return {
@@ -10,7 +10,12 @@ function baseCtx(overrides: Partial<Context> = {}): Context {
     oversizedFiles: [],
     excludeArgs: { git: [] },
     assignments: [{ files: [] }, { files: [] }],
-    metrics: { totalFiles: 1, totalAdded: 1, totalDeleted: 0, totalChangedLines: 1 },
+    metrics: {
+      totalFiles: 1,
+      totalAdded: 1,
+      totalDeleted: 0,
+      totalChangedLines: 1,
+    },
     tier: "normal",
     diffArgs: ["--staged"],
     ...overrides,
@@ -51,7 +56,10 @@ describe("formatSummary", () => {
   });
 
   it("confirmed 1件以上のとき resolved:true は path:line を含める", () => {
-    const final = baseFinal({ issues: [issue()], stats: { total: 1, confirmed: 1, rejected: 0, unverified: 0 } });
+    const final = baseFinal({
+      issues: [issue()],
+      stats: { total: 1, confirmed: 1, rejected: 0, unverified: 0 },
+    });
     const out = formatSummary(final, baseCtx());
     expect(out).toContain("[bug · high]");
     expect(out).toContain("a.ts:10");
@@ -60,7 +68,9 @@ describe("formatSummary", () => {
 
   it("resolved:false の issue は path のみ（行番号なし）", () => {
     const final = baseFinal({
-      issues: [issue({ resolved: false, params: undefined, reason: "アンカー未解決" })],
+      issues: [
+        issue({ resolved: false, params: undefined, reason: "アンカー未解決" }),
+      ],
       stats: { total: 1, confirmed: 1, rejected: 0, unverified: 0 },
     });
     const out = formatSummary(final, baseCtx());
@@ -70,7 +80,14 @@ describe("formatSummary", () => {
 
   it("rejected 件数と各 title/reason を表示する", () => {
     const final = baseFinal({
-      rejected: [{ id: "g2", path: "b.ts", title: "却下された指摘", reason: "実際は問題ない" }],
+      rejected: [
+        {
+          id: "g2",
+          path: "b.ts",
+          title: "却下された指摘",
+          reason: "実際は問題ない",
+        },
+      ],
       stats: { total: 1, confirmed: 0, rejected: 1, unverified: 0 },
     });
     const out = formatSummary(final, baseCtx());
@@ -94,14 +111,21 @@ describe("formatSummary", () => {
       excludedFiles: ["dist/bundle.js"],
       oversizedFiles: ["big.ts"],
       tier: "tiny",
-      metrics: { totalFiles: 1, totalAdded: 10, totalDeleted: 0, totalChangedLines: 10 },
+      metrics: {
+        totalFiles: 1,
+        totalAdded: 10,
+        totalDeleted: 0,
+        totalChangedLines: 10,
+      },
     });
     const out = formatSummary(baseFinal(), ctx);
     expect(out).toContain("レビュー対象外: 1 ファイル（生成物/バイナリ等）");
     expect(out).toContain("dist/bundle.js");
     expect(out).toContain("レビュー対象外（大規模変更）: 1 ファイル");
     expect(out).toContain("big.ts");
-    expect(out).toContain("変更規模: tiny（1 ファイル / 10 行）— 一部のレビューエージェントを省略しました");
+    expect(out).toContain(
+      "変更規模: tiny（1 ファイル / 10 行）— 一部のレビューエージェントを省略しました",
+    );
   });
 
   it("tier が normal のときは縮退表示を出さない", () => {

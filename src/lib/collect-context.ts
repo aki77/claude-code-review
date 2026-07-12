@@ -12,7 +12,13 @@ import { existsSync, readFileSync } from "node:fs";
 import { glob } from "node:fs/promises";
 import path from "node:path";
 import { execFileAsync } from "./exec.ts";
-import type { Assignment, Context, ContextSource, Rule, Tier } from "./types.ts";
+import type {
+  Assignment,
+  Context,
+  ContextSource,
+  Rule,
+  Tier,
+} from "./types.ts";
 
 type Exec = typeof execFileAsync;
 
@@ -73,12 +79,18 @@ const TIER_THRESHOLDS = {
 // 環境変数で調整可能。tier の行数しきい値（TIER_THRESHOLDS.small.maxLines 等）より大きい前提で、
 // これを下げて tier しきい値を下回らせると「単一ファイルが tier しきい値を跨ぐ前に oversized 落ち」
 // して tier の意味が変わるので注意（両しきい値とも「変更規模の分類」という同じ概念系に属する）。
-const OVERSIZED_MAX_LINES = num(process.env.CODE_REVIEW_OVERSIZED_MAX_LINES, 1000);
+const OVERSIZED_MAX_LINES = num(
+  process.env.CODE_REVIEW_OVERSIZED_MAX_LINES,
+  1000,
+);
 
 // 変更規模から tier を決める純粋関数。
 // tiny/small はいずれも「ファイル数 AND 行数」の両方がしきい値未満のときのみ該当し、
 // どちらか一方でも超えたら上位 tier（最終的に normal）へ繰り上がる。
-export function classifyTier(totalFiles: number, totalChangedLines: number): Tier {
+export function classifyTier(
+  totalFiles: number,
+  totalChangedLines: number,
+): Tier {
   const { tiny, small } = TIER_THRESHOLDS;
   if (totalFiles <= tiny.maxFiles && totalChangedLines < tiny.maxLines) {
     return "tiny";
@@ -100,7 +112,13 @@ export async function resolvePrBaseRange(
   pr: string,
   { exec = execFileAsync }: { exec?: Exec } = {},
 ): Promise<string> {
-  const raw = await exec("gh", ["pr", "view", pr, "--json", "baseRefOid,baseRefName"]);
+  const raw = await exec("gh", [
+    "pr",
+    "view",
+    pr,
+    "--json",
+    "baseRefOid,baseRefName",
+  ]);
   const meta = JSON.parse(raw.stdout);
   const baseRefOid: string | undefined = meta.baseRefOid;
   const baseRefName: string | undefined = meta.baseRefName;
@@ -111,7 +129,11 @@ export async function resolvePrBaseRange(
   }
 
   // base コミットがローカルに存在するか。fork PR / shallow clone では欠落しうる。
-  const catFile = await exec("git", ["cat-file", "-e", `${baseRefOid}^{commit}`]);
+  const catFile = await exec("git", [
+    "cat-file",
+    "-e",
+    `${baseRefOid}^{commit}`,
+  ]);
   if (catFile.code !== 0) {
     throw new Error(
       `PR #${pr} の base コミット（${baseRefOid}）がローカルに存在しません。` +
@@ -138,13 +160,20 @@ export async function getChangedFilesFromRange(
 ): Promise<string[]> {
   // GitHub は常時 rename 検出のため --find-renames を明示する
   // （diff.renames=false なリポジトリでの列挙差異を防ぐ）。
-  const out = await exec("git", ["diff", "--name-only", "--find-renames", range]);
+  const out = await exec("git", [
+    "diff",
+    "--name-only",
+    "--find-renames",
+    range,
+  ]);
   return splitLines(out.stdout);
 }
 
 export async function getStagedFiles({
   exec = execFileAsync,
-}: { exec?: Exec } = {}): Promise<string[]> {
+}: {
+  exec?: Exec;
+} = {}): Promise<string[]> {
   const out = await exec("git", ["diff", "--staged", "--name-only"]);
   return splitLines(out.stdout);
 }
@@ -195,11 +224,22 @@ export async function collectChangedLines(
   excludeArgs: string[],
   { exec = execFileAsync }: { exec?: Exec } = {},
 ): Promise<ChangedLinesResult> {
-  const args = ["diff", "--numstat", "--find-renames", ...diffArgs, ...excludeArgs];
+  const args = [
+    "diff",
+    "--numstat",
+    "--find-renames",
+    ...diffArgs,
+    ...excludeArgs,
+  ];
   const result = await exec("git", args, { maxBuffer: 256 * 1024 * 1024 });
   if (result.code !== 0) {
     // numstat の取得に失敗しても tier 判定を落とさない（normal 相当＝全エージェント起動）。
-    return { totalAdded: 0, totalDeleted: 0, totalChangedLines: 0, perFile: new Map() };
+    return {
+      totalAdded: 0,
+      totalDeleted: 0,
+      totalChangedLines: 0,
+      perFile: new Map(),
+    };
   }
   let totalAdded = 0;
   let totalDeleted = 0;
@@ -211,7 +251,12 @@ export async function collectChangedLines(
       perFile.set(r.path, { added: r.added, deleted: r.deleted });
     }
   }
-  return { totalAdded, totalDeleted, totalChangedLines: totalAdded + totalDeleted, perFile };
+  return {
+    totalAdded,
+    totalDeleted,
+    totalChangedLines: totalAdded + totalDeleted,
+    perFile,
+  };
 }
 
 function splitLines(out: string): string[] {
@@ -260,7 +305,11 @@ export async function resolveRange(
   ]);
   const baseBranch = ghPrBase?.replace(/#\S*$/, "").trim();
   if (baseBranch) {
-    const base = await execTrimmedOrNull(exec, "git", ["merge-base", baseBranch, "HEAD"]);
+    const base = await execTrimmedOrNull(exec, "git", [
+      "merge-base",
+      baseBranch,
+      "HEAD",
+    ]);
     if (base) return `${base}...HEAD`;
   }
 
@@ -272,11 +321,19 @@ export async function resolveRange(
   if (vscodeBase) return `${vscodeBase}...HEAD`;
 
   // 3. @{upstream}
-  const upstreamBase = await execTrimmedOrNull(exec, "git", ["merge-base", "@{upstream}", "HEAD"]);
+  const upstreamBase = await execTrimmedOrNull(exec, "git", [
+    "merge-base",
+    "@{upstream}",
+    "HEAD",
+  ]);
   if (upstreamBase) return `${upstreamBase}...HEAD`;
 
   // 4. origin/HEAD
-  const originBase = await execTrimmedOrNull(exec, "git", ["merge-base", "origin/HEAD", "HEAD"]);
+  const originBase = await execTrimmedOrNull(exec, "git", [
+    "merge-base",
+    "origin/HEAD",
+    "HEAD",
+  ]);
   if (originBase) return `${originBase}...HEAD`;
 
   throw new Error(
@@ -419,7 +476,11 @@ export function parseCheckAttrOutput(out: string): Set<string> {
   for (let i = 0; i + 2 < parts.length; i += 3) {
     const path_ = parts[i];
     const value = parts[i + 2];
-    if (path_ !== undefined && value !== undefined && !ATTR_NEGATIVE_VALUES.has(value)) {
+    if (
+      path_ !== undefined &&
+      value !== undefined &&
+      !ATTR_NEGATIVE_VALUES.has(value)
+    ) {
       excluded.add(path_);
     }
   }
@@ -489,7 +550,6 @@ export async function collectRules(changedFiles: string[]): Promise<Rule[]> {
     if (paths === null) {
       results.push({ path: file, paths: null });
     } else if (paths.length === 0) {
-      continue;
     } else if (changedFiles.some((f) => fileMatchesPatterns(f, paths))) {
       results.push({ path: file, paths });
     }
@@ -559,7 +619,8 @@ export function buildAssignments(
     for (const r of sub) if (!sup.has(r)) return false;
     return true;
   };
-  const smaller = () => (bucketA.files.length <= bucketB.files.length ? bucketA : bucketB);
+  const smaller = () =>
+    bucketA.files.length <= bucketB.files.length ? bucketA : bucketB;
   const place = (
     bucket: Bucket,
     group: { ruleSet: Set<string> },
@@ -588,7 +649,10 @@ export function buildAssignments(
     // 極大グループ。これらが各バケットのルール和集合を決める。残りは filler。
     const isMaximal = (g: RuleGroup) =>
       !groups.some(
-        (o) => o !== g && o.ruleSet.size > g.ruleSet.size && isSubset(g.ruleSet, o.ruleSet),
+        (o) =>
+          o !== g &&
+          o.ruleSet.size > g.ruleSet.size &&
+          isSubset(g.ruleSet, o.ruleSet),
       );
     const skeleton: RuleGroup[] = [];
     const fillers: RuleGroup[] = [];
@@ -601,7 +665,9 @@ export function buildAssignments(
 
     // filler グループのファイルは1ファイル単位で、ルール和集合の部分集合になっている
     // バケットのうち少ない方へ入れて均等化する（余分なルールは読ませない）。
-    const flatFillers = fillers.flatMap((g) => g.files.map((f) => ({ file: f, ruleSet: g.ruleSet })));
+    const flatFillers = fillers.flatMap((g) =>
+      g.files.map((f) => ({ file: f, ruleSet: g.ruleSet })),
+    );
     for (const { file, ruleSet } of flatFillers) {
       // 余分なルールを読ませないバケットを優先候補にする。次のいずれかを満たすバケット:
       //   - ruleSet がバケット和集合の部分集合（入れても和集合が増えない）
@@ -611,13 +677,17 @@ export function buildAssignments(
         (b) => isSubset(ruleSet, b.ruleUnion) || isSubset(b.ruleUnion, ruleSet),
       );
       const pool = candidates.length ? candidates : buckets;
-      const target = pool.reduce((a, b) => (a.files.length <= b.files.length ? a : b));
+      const target = pool.reduce((a, b) =>
+        a.files.length <= b.files.length ? a : b,
+      );
       place(target, { ruleSet }, [file]);
     }
   }
 
   return buckets.map((b) => ({
-    files: b.files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
+    files: b.files.sort((a, b) =>
+      a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
+    ),
   }));
 }
 
@@ -651,7 +721,9 @@ export async function collectContext(
   // 除外したファイルは excludedFiles として明示し、暗黙のスキップにしない。
   // 先にデフォルト glob で除外できるものを外し、残りだけ git check-attr に問い合わせる
   // （バイナリ多数の diff で check-attr へ渡すパスを減らす）。
-  const globSurvivors = rawFiles.filter((f) => !fileMatchesPatterns(f, DEFAULT_EXCLUDE_GLOBS));
+  const globSurvivors = rawFiles.filter(
+    (f) => !fileMatchesPatterns(f, DEFAULT_EXCLUDE_GLOBS),
+  );
   const attrExcludedSet = await detectLinguistExcluded(globSurvivors, { exec });
   const { kept: keptFiles, excluded: excludedFiles } = classifyFiles(rawFiles, {
     attrExcludedSet,
@@ -662,9 +734,13 @@ export async function collectContext(
   // まず「生成物/バイナリのみ除外」した diff で numstat を取り、ファイル別行数を得る。
   // この perFile から oversized（1ファイルが巨大な変更）を分離する。行数集計は同じ出力から
   // 得られるので numstat は1回だけ（追加コストなし）。
-  const lineStats = await collectChangedLines(diffArgs, buildExcludeArgs(excludedFiles).git, {
-    exec,
-  });
+  const lineStats = await collectChangedLines(
+    diffArgs,
+    buildExcludeArgs(excludedFiles).git,
+    {
+      exec,
+    },
+  );
   const { changedFiles, oversizedFiles } = splitOversized(
     keptFiles,
     lineStats.perFile,
@@ -707,7 +783,8 @@ export async function collectContext(
 
   // source は全モードで出力する。PR モードもローカル range に統一されたため、diffArgs /
   // range を持つ（PR は `<baseRefOid>...HEAD`、staged は `--staged`）。
-  const source: ContextSource = opts.mode === "pr" ? "pr" : range ? "range" : "staged";
+  const source: ContextSource =
+    opts.mode === "pr" ? "pr" : range ? "range" : "staged";
   const context: Context = {
     source,
     changedFiles,

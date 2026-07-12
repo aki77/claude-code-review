@@ -13,6 +13,8 @@ pnpm dev -- pr <number> [--comment] [--debug]
 pnpm build   # tsc
 pnpm test    # vitest run
 pnpm test:watch
+pnpm lint    # biome check（lint + format チェック、非破壊）
+pnpm format  # biome check --write（自動修正）
 ```
 
 ## 設計原則（最重要）
@@ -57,7 +59,16 @@ processFindings → LLMマージ → mergeFindings → LLM検証 → applyVerdic
   相対 import は `.ts` 拡張子で書くこと（`.js` ではない）。理由: Node の型ストリッピングは
   import 指定子を書き換えないため、dev 実行時はディスク上に実在するファイル（`.ts`）を指す
   必要がある。tsconfig の `allowImportingTsExtensions` + `rewriteRelativeImportExtensions`
-  により、`tsc` ビルド時は出力の import が自動的に `.js` へ書き換わる。
+  により、`tsc` ビルド時は出力の import が自動的に `.js` へ書き換わる。この方針は Biome の
+  `useImportExtensions`（`biome.jsonc`、`extensionMappings: {"ts":"ts"}`）で機械的に強制
+  されており、`.js` に戻すと `pnpm lint` がエラーになる。
+- Biome導入時、`noNonNullAssertion` はオフにしている。理由: tsconfig の
+  `noUncheckedIndexedAccess` により配列/Map アクセス後の非null アサーション（`!`）が
+  境界確認済みであることを示す正当な書き方として多用されているため。
+- git hook は依存ツール（husky 等）を使わず `core.hooksPath` 方式。`pnpm install` 時に
+  `prepare` スクリプトが `git config --local core.hooksPath .githooks` を設定し、
+  `.githooks/pre-commit` が `lint-staged` 経由で staged ファイルに `biome check --write`
+  を適用する。
 - `@types/node` のバージョンは Node 本体のバージョンと一致しない
   （例: Node `v24.18.0` でも `@types/node` は `^24.1.0` 系）。npm 上の実在バージョンを
   確認してから追加すること。

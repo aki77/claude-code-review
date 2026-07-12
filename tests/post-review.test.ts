@@ -4,7 +4,9 @@ import type { FinalDoc, Issue } from "../src/lib/types.ts";
 
 // テストで変化しない共通フィールドを既定値にし、各ケースは差分（id/path/existingCode/
 // resolved/params/sourceFindingIds 等）だけ渡せばよいようにするビルダー。
-function makeIssue(overrides: Partial<Issue> & Pick<Issue, "id" | "path">): Issue {
+function makeIssue(
+  overrides: Partial<Issue> & Pick<Issue, "id" | "path">,
+): Issue {
   return {
     kind: "bug",
     category: "bug",
@@ -24,7 +26,12 @@ function makeFinalDoc(issues: Issue[]): FinalDoc {
     issues,
     rejected: [],
     unverified: [],
-    stats: { total: issues.length, confirmed, rejected: 0, unverified: issues.length - confirmed },
+    stats: {
+      total: issues.length,
+      confirmed,
+      rejected: 0,
+      unverified: issues.length - confirmed,
+    },
   };
 }
 
@@ -46,9 +53,20 @@ function makeBaseFinalDoc(): FinalDoc {
       existingCode: "# APM dependencies\napm_modules/",
       resolved: true,
       sourceFindingIds: ["f2"],
-      params: { startLine: 3, line: 4, startSide: "RIGHT", side: "RIGHT", subjectType: "LINE" },
+      params: {
+        startLine: 3,
+        line: 4,
+        startSide: "RIGHT",
+        side: "RIGHT",
+        subjectType: "LINE",
+      },
     }),
-    makeIssue({ id: "g3", path: "src/c.js", sourceFindingIds: ["f3"], reason: "不一致" }),
+    makeIssue({
+      id: "g3",
+      path: "src/c.js",
+      sourceFindingIds: ["f3"],
+      reason: "不一致",
+    }),
   ]);
 }
 
@@ -85,7 +103,12 @@ describe("post-review", () => {
       { commitId: "x" },
     );
     const c1 = p.comments.find((c) => c.path === "src/a.js")!;
-    expect(c1).toEqual({ path: "src/a.js", body: "x", line: 10, side: "RIGHT" });
+    expect(c1).toEqual({
+      path: "src/a.js",
+      body: "x",
+      line: 10,
+      side: "RIGHT",
+    });
     expect("start_line" in c1).toBe(false);
     expect("subjectType" in c1).toBe(false);
   });
@@ -125,7 +148,9 @@ describe("post-review", () => {
       makeBaseFinalDoc(),
       { commitId: "x" },
     );
-    expect(p.comments.find((c) => c.path === "src/a.js")!.body).toBe("文章のみ");
+    expect(p.comments.find((c) => c.path === "src/a.js")!.body).toBe(
+      "文章のみ",
+    );
   });
 
   it("suggestion: 行数一致（単一行 singleton）は ```suggestion ブロックで結合する", () => {
@@ -153,7 +178,11 @@ describe("post-review", () => {
         summaryBody: "s",
         comments: [
           { id: "g1", commentBody: "x" },
-          { id: "g2", commentBody: "コメントは日本語で", suggestion: "# APMパッケージ依存" },
+          {
+            id: "g2",
+            commentBody: "コメントは日本語で",
+            suggestion: "# APMパッケージ依存",
+          },
         ],
       },
       makeBaseFinalDoc(),
@@ -222,7 +251,12 @@ describe("post-review", () => {
       }),
     ]);
     const p = buildPayload(
-      { summaryBody: "s", comments: [{ id: "g1", commentBody: "統合課題", suggestion: "const x = 2;" }] },
+      {
+        summaryBody: "s",
+        comments: [
+          { id: "g1", commentBody: "統合課題", suggestion: "const x = 2;" },
+        ],
+      },
       merged,
       { commitId: "x" },
     );
@@ -238,7 +272,13 @@ describe("post-review", () => {
       existingCode: "a\nb\nc",
       resolved: true,
       sourceFindingIds: ["f1"],
-      params: { startLine: 1, line: 2, startSide: "RIGHT", side: "RIGHT", subjectType: "LINE" },
+      params: {
+        startLine: 1,
+        line: 2,
+        startSide: "RIGHT",
+        side: "RIGHT",
+        subjectType: "LINE",
+      },
     });
     const r = buildSuggestionBody(issue, "a\nb", []);
     expect(r.ok).toBe(false);
@@ -247,7 +287,9 @@ describe("post-review", () => {
 
   it("検証: comments が配列でなければ throw", () => {
     expect(() =>
-      buildPayload({ summaryBody: "s" } as never, makeBaseFinalDoc(), { commitId: "x" }),
+      buildPayload({ summaryBody: "s" } as never, makeBaseFinalDoc(), {
+        commitId: "x",
+      }),
     ).toThrow(/comments は配列/);
   });
 
@@ -298,9 +340,13 @@ describe("post-review", () => {
   it("検証: resolved:true confirmed の黙殺（comments 欠落）は throw", () => {
     // g2 を渡し忘れ → 黙殺防止で throw。
     expect(() =>
-      buildPayload({ summaryBody: "s", comments: [{ id: "g1", commentBody: "x" }] }, makeBaseFinalDoc(), {
-        commitId: "x",
-      }),
+      buildPayload(
+        { summaryBody: "s", comments: [{ id: "g1", commentBody: "x" }] },
+        makeBaseFinalDoc(),
+        {
+          commitId: "x",
+        },
+      ),
     ).toThrow(/黙殺防止/);
   });
 
@@ -321,7 +367,9 @@ describe("post-review", () => {
   });
 
   it("許容: resolved 済み issue 0 件ならサマリのみ投稿（課題ゼロ）", () => {
-    const emptyFinal = makeFinalDoc([makeIssue({ id: "g3", path: "c.js", sourceFindingIds: ["f3"] })]);
+    const emptyFinal = makeFinalDoc([
+      makeIssue({ id: "g3", path: "c.js", sourceFindingIds: ["f3"] }),
+    ]);
     const p = buildPayload(
       { summaryBody: "問題は見つかりませんでした。", comments: [] },
       emptyFinal,
@@ -333,7 +381,11 @@ describe("post-review", () => {
 
   it("許容: confirmed 0 件（FINAL 空）ならサマリのみ投稿", () => {
     const emptyFinal = makeFinalDoc([]);
-    const p = buildPayload({ summaryBody: "課題なし", comments: [] }, emptyFinal, { commitId: "x" });
+    const p = buildPayload(
+      { summaryBody: "課題なし", comments: [] },
+      emptyFinal,
+      { commitId: "x" },
+    );
     expect(p.comments).toEqual([]);
   });
 });

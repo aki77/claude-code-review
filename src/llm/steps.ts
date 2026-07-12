@@ -5,7 +5,16 @@
 // 設計原則（docs/plans/04-llm-steps.md）: LLM は意味判断のみ。位置解決・検証・フィルタ適用・
 // 構造転写・グルーピング・並列制御はすべてコードで決定論的に行う（Promise.all で並列化）。
 import { readFileSync } from "node:fs";
-import { runStructured, type QueryFn } from "./client.ts";
+import type {
+  Assignment,
+  Cluster,
+  Context,
+  FindingsDoc,
+  Issue,
+  MergeText,
+  Verdict,
+} from "../lib/types.ts";
+import { type QueryFn, runStructured } from "./client.ts";
 import {
   bugAgentSystem,
   bugAgentUser,
@@ -21,15 +30,14 @@ import {
   reviewMdAgentUser,
   ruleAgentSystem,
   ruleAgentUser,
-  summaryClustersSystem,
-  summaryClustersUser,
   SUMMARY_CLUSTERS_SCHEMA,
   SUMMARY_ONLY_SCHEMA,
+  summaryClustersSystem,
+  summaryClustersUser,
+  VERDICT_SCHEMA,
   verifySystem,
   verifyUser,
-  VERDICT_SCHEMA,
 } from "./prompts.ts";
-import type { Assignment, Cluster, Context, FindingsDoc, Issue, MergeText, Verdict } from "../lib/types.ts";
 
 export type DebugSink = (label: string, obj: unknown) => void;
 
@@ -60,10 +68,15 @@ async function runAgentSafe<T>(
 ): Promise<T> {
   try {
     const result = await fn();
-    debug?.(`agent:${label}`, { usage: result.usage, totalCostUsd: result.totalCostUsd });
+    debug?.(`agent:${label}`, {
+      usage: result.usage,
+      totalCostUsd: result.totalCostUsd,
+    });
     return result.data;
   } catch (error) {
-    debug?.(`agent:${label}:failed`, { error: error instanceof Error ? error.message : error });
+    debug?.(`agent:${label}:failed`, {
+      error: error instanceof Error ? error.message : error,
+    });
     return fallback;
   }
 }
@@ -81,7 +94,11 @@ async function runFindingsAgent(
     { system, user, model, schema: FINDINGS_SCHEMA },
     { query: queryFn },
   );
-  return { data: result.data.findings, usage: result.usage, totalCostUsd: result.totalCostUsd };
+  return {
+    data: result.data.findings,
+    usage: result.usage,
+    totalCostUsd: result.totalCostUsd,
+  };
 }
 
 // ---- step2: サマリ + 影響クラスタ分割 ----------------------------------------
@@ -100,11 +117,17 @@ export async function llmSummaryAndClusters(
   const wantClusters = ctx.tier !== "tiny";
   const queryFn = deps.query;
 
-  const fallback: SummaryAndClustersResult = { summary: null, rawClusters: [] as unknown[] };
+  const fallback: SummaryAndClustersResult = {
+    summary: null,
+    rawClusters: [] as unknown[],
+  };
   return runAgentSafe<SummaryAndClustersResult>(
     "summary",
     async () => {
-      const result = await runStructured<{ summary: string; clusters?: unknown }>(
+      const result = await runStructured<{
+        summary: string;
+        clusters?: unknown;
+      }>(
         {
           system: summaryClustersSystem({ wantClusters }),
           user: summaryClustersUser({ authorInfo, diffText, wantClusters }),
@@ -142,7 +165,9 @@ export interface ReviewAgentsInput {
 function stampAgent(findings: unknown, agent: number): unknown[] {
   if (!Array.isArray(findings)) return [];
   return findings.map((f) =>
-    f && typeof f === "object" ? { ...(f as Record<string, unknown>), agent } : f,
+    f && typeof f === "object"
+      ? { ...(f as Record<string, unknown>), agent }
+      : f,
   );
 }
 
@@ -208,7 +233,13 @@ export async function llmReviewAgents(
     tasks.push(
       runAgentSafe(
         "agent3",
-        () => runFindingsAgent(bugAgentSystem(), bugAgentUser({ summary, diffText }), MODEL_HEAVY, queryFn),
+        () =>
+          runFindingsAgent(
+            bugAgentSystem(),
+            bugAgentUser({ summary, diffText }),
+            MODEL_HEAVY,
+            queryFn,
+          ),
         [],
         debug,
       ).then((findings) => stampAgent(findings, 3)),
@@ -222,11 +253,19 @@ export async function llmReviewAgents(
       runAgentSafe(
         `agent4:cluster${cluster.id}`,
         () => {
-          const contextFiles = cluster.contextHints.map((path) => ({ path, content: readFile(path) }));
+          const contextFiles = cluster.contextHints.map((path) => ({
+            path,
+            content: readFile(path),
+          }));
           const clusterDiff = filterDiffByFiles(diffText, cluster.changedFiles);
           return runFindingsAgent(
             clusterAgentSystem(),
-            clusterAgentUser({ cluster, summary, diffText: clusterDiff, contextFiles }),
+            clusterAgentUser({
+              cluster,
+              summary,
+              diffText: clusterDiff,
+              contextFiles,
+            }),
             MODEL_HEAVY,
             queryFn,
           );
@@ -306,12 +345,20 @@ export async function llmMergeTexts(
             },
             { query: queryFn },
           );
-          return { data: result.data, usage: result.usage, totalCostUsd: result.totalCostUsd };
+          return {
+            data: result.data,
+            usage: result.usage,
+            totalCostUsd: result.totalCostUsd,
+          };
         },
         fallback,
         debug,
       );
-      return { groupId: group.id, title: text.title, body: text.body } satisfies MergeText;
+      return {
+        groupId: group.id,
+        title: text.title,
+        body: text.body,
+      } satisfies MergeText;
     }),
   );
 
@@ -322,6 +369,7 @@ export async function llmMergeTexts(
 
 export async function llmVerifyIssues(
   issues: Issue[],
+  // biome-ignore lint/correctness/noUnusedFunctionParameters: 呼び出し側 API 互換のため保持（既存実装、未使用理由は未調査）
   diffText: string,
   summary: string | null,
   deps: StepDeps = {},
@@ -334,10 +382,16 @@ export async function llmVerifyIssues(
       const model = issue.kind === "bug" ? MODEL_HEAVY : MODEL_LIGHT;
       // 失敗 issue の縮退: その verdict を配列に含めない → applyVerdicts が自動的に
       // unverified にする。runAgentSafe に null フォールバックを渡し、後段でフィルタする。
-      const verdict = await runAgentSafe<{ verdict: "confirmed" | "rejected"; reason: string } | null>(
+      const verdict = await runAgentSafe<{
+        verdict: "confirmed" | "rejected";
+        reason: string;
+      } | null>(
         `verify:${issue.id}`,
         async () => {
-          const result = await runStructured<{ verdict: "confirmed" | "rejected"; reason: string }>(
+          const result = await runStructured<{
+            verdict: "confirmed" | "rejected";
+            reason: string;
+          }>(
             {
               system: verifySystem(),
               user: verifyUser({ issue, summary }),
@@ -346,14 +400,22 @@ export async function llmVerifyIssues(
             },
             { query: queryFn },
           );
-          return { data: result.data, usage: result.usage, totalCostUsd: result.totalCostUsd };
+          return {
+            data: result.data,
+            usage: result.usage,
+            totalCostUsd: result.totalCostUsd,
+          };
         },
         null,
         debug,
       );
       return verdict === null
         ? null
-        : ({ id: issue.id, verdict: verdict.verdict, reason: verdict.reason } as Verdict);
+        : ({
+            id: issue.id,
+            verdict: verdict.verdict,
+            reason: verdict.reason,
+          } as Verdict);
     }),
   );
 

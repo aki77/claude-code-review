@@ -66,12 +66,16 @@ describe("applyVerdicts", () => {
       { id: "g2", verdict: "rejected", reason: "誤検知" },
       { id: "g3", verdict: "confirmed" },
     ]);
-    expect(r.rejected).toEqual([{ id: "g2", path: "b.js", title: "T2", reason: "誤検知" }]);
+    expect(r.rejected).toEqual([
+      { id: "g2", path: "b.js", title: "T2", reason: "誤検知" },
+    ]);
   });
 
   it("reason 省略時は空文字になる", () => {
     const r = applyVerdicts(doc, [{ id: "g2", verdict: "rejected" }]);
-    expect(r.rejected).toEqual([{ id: "g2", path: "b.js", title: "T2", reason: "" }]);
+    expect(r.rejected).toEqual([
+      { id: "g2", path: "b.js", title: "T2", reason: "" },
+    ]);
   });
 
   it("stdin に無い issue は unverified として除外", () => {
@@ -91,11 +95,18 @@ describe("applyVerdicts", () => {
       { id: "g1", verdict: "confirmed" },
       { id: "g2", verdict: "rejected", reason: "x" },
     ]);
-    expect(r.stats).toEqual({ total: 3, confirmed: 1, rejected: 1, unverified: 1 });
+    expect(r.stats).toEqual({
+      total: 3,
+      confirmed: 1,
+      rejected: 1,
+      unverified: 1,
+    });
   });
 
   it("エラー: 未知 id", () => {
-    expect(() => applyVerdicts(doc, [{ id: "g99", verdict: "confirmed" }])).toThrow(/未知の issue id/);
+    expect(() =>
+      applyVerdicts(doc, [{ id: "g99", verdict: "confirmed" }]),
+    ).toThrow(/未知の issue id/);
   });
 
   it("エラー: 重複 id", () => {
@@ -108,7 +119,9 @@ describe("applyVerdicts", () => {
   });
 
   it("エラー: enum 外の verdict", () => {
-    expect(() => applyVerdicts(doc, [{ id: "g1", verdict: "maybe" }])).toThrow(/confirmed.*rejected/);
+    expect(() => applyVerdicts(doc, [{ id: "g1", verdict: "maybe" }])).toThrow(
+      /confirmed.*rejected/,
+    );
   });
 
   it("エラー: stdin が配列でない", () => {

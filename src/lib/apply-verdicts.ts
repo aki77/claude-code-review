@@ -9,7 +9,14 @@
 //
 // confirmed の issue は merge-findings.ts が転写した category/severity をそのまま保持する
 // （このモジュールは issue を丸ごと保持するため、コード変更なしで FINAL まで自動的に携行される）。
-import type { FinalDoc, Issue, IssuesDoc, RejectedIssue, Verdict, VerdictKind } from "./types.ts";
+import type {
+  FinalDoc,
+  Issue,
+  IssuesDoc,
+  RejectedIssue,
+  Verdict,
+  VerdictKind,
+} from "./types.ts";
 
 export const VALID_VERDICTS = new Set<VerdictKind>(["confirmed", "rejected"]);
 
@@ -18,12 +25,17 @@ function isVerdictKind(value: unknown): value is VerdictKind {
 }
 
 // issuesDoc（ISSUES の中身）と verdicts（検証結果配列）から FINAL を組み立てる純粋関数。
-export function applyVerdicts(issuesDoc: IssuesDoc, verdicts: unknown): FinalDoc {
+export function applyVerdicts(
+  issuesDoc: IssuesDoc,
+  verdicts: unknown,
+): FinalDoc {
   const { issues } = issuesDoc;
   const issueById = new Map(issues.map((i) => [i.id, i]));
 
   if (!Array.isArray(verdicts)) {
-    throw new Error("stdin は [{id, verdict, reason}] の配列である必要があります");
+    throw new Error(
+      "stdin は [{id, verdict, reason}] の配列である必要があります",
+    );
   }
 
   const verdictById = new Map<string, Verdict>();
@@ -41,9 +53,15 @@ export function applyVerdicts(issuesDoc: IssuesDoc, verdicts: unknown): FinalDoc
     }
     const { verdict, reason } = rec;
     if (!isVerdictKind(verdict)) {
-      throw new Error(`issue id=${id} の verdict は "confirmed" または "rejected" である必要があります`);
+      throw new Error(
+        `issue id=${id} の verdict は "confirmed" または "rejected" である必要があります`,
+      );
     }
-    verdictById.set(id, { id, verdict, reason: typeof reason === "string" ? reason : undefined });
+    verdictById.set(id, {
+      id,
+      verdict,
+      reason: typeof reason === "string" ? reason : undefined,
+    });
   }
 
   const confirmed: Issue[] = [];
@@ -57,7 +75,12 @@ export function applyVerdicts(issuesDoc: IssuesDoc, verdicts: unknown): FinalDoc
     } else if (v.verdict === "confirmed") {
       confirmed.push(issue);
     } else {
-      rejected.push({ id: issue.id, path: issue.path, title: issue.title, reason: v.reason ?? "" });
+      rejected.push({
+        id: issue.id,
+        path: issue.path,
+        title: issue.title,
+        reason: v.reason ?? "",
+      });
     }
   }
 

@@ -16,42 +16,34 @@ import { runStructured } from "../src/llm/client.ts";
 delete process.env.ANTHROPIC_API_KEY;
 
 describe.skipIf(!process.env.RUN_LIVE)("auth smoke", () => {
-  it(
-    "outputFormat 経路（json_schema）で構造化出力が得られる",
-    async () => {
-      const { data, usage, totalCostUsd } = await runStructured<{
-        answer: number;
-      }>({
-        system: "あなたは算数の問題に答えるアシスタントです。",
-        user: "1+1は？ answer に数値で JSON を返してください。",
-        schema: {
-          type: "object",
-          properties: { answer: { type: "number" } },
-          required: ["answer"],
-        },
-      });
+  it("outputFormat 経路（json_schema）で構造化出力が得られる", async () => {
+    const { data, usage, totalCostUsd } = await runStructured<{
+      answer: number;
+    }>({
+      system: "あなたは算数の問題に答えるアシスタントです。",
+      user: "1+1は？ answer に数値で JSON を返してください。",
+      schema: {
+        type: "object",
+        properties: { answer: { type: "number" } },
+        required: ["answer"],
+      },
+    });
 
-      expect(data.answer).toBe(2);
-      console.log("[outputFormat] usage:", usage);
-      console.log("[outputFormat] totalCostUsd:", totalCostUsd);
-    },
-    30_000,
-  );
+    expect(data.answer).toBe(2);
+    console.log("[outputFormat] usage:", usage);
+    console.log("[outputFormat] totalCostUsd:", totalCostUsd);
+  }, 30_000);
 
-  it(
-    "system prompt 強制経路（schema 無し）で JSON.parse が通る",
-    async () => {
-      const { data, usage, totalCostUsd } = await runStructured<{
-        answer: number;
-      }>({
-        system: "あなたは算数の問題に答えるアシスタントです。",
-        user: "1+1は？ answer に数値で JSON を返してください。",
-      });
+  it("system prompt 強制経路（schema 無し）で JSON.parse が通る", async () => {
+    const { data, usage, totalCostUsd } = await runStructured<{
+      answer: number;
+    }>({
+      system: "あなたは算数の問題に答えるアシスタントです。",
+      user: "1+1は？ answer に数値で JSON を返してください。",
+    });
 
-      expect(data.answer).toBe(2);
-      console.log("[system prompt] usage:", usage);
-      console.log("[system prompt] totalCostUsd:", totalCostUsd);
-    },
-    30_000,
-  );
+    expect(data.answer).toBe(2);
+    console.log("[system prompt] usage:", usage);
+    console.log("[system prompt] totalCostUsd:", totalCostUsd);
+  }, 30_000);
 });

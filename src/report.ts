@@ -36,12 +36,16 @@ export function formatSummary(final: FinalDoc, ctx: Context): string {
 
   if (final.stats.unverified > 0) {
     lines.push("");
-    lines.push(`unverified: ${final.stats.unverified} 件（${final.unverified.join(", ")}）`);
+    lines.push(
+      `unverified: ${final.stats.unverified} 件（${final.unverified.join(", ")}）`,
+    );
   }
 
   if (ctx.excludedFiles.length > 0) {
     lines.push("");
-    lines.push(`レビュー対象外: ${ctx.excludedFiles.length} ファイル（生成物/バイナリ等）`);
+    lines.push(
+      `レビュー対象外: ${ctx.excludedFiles.length} ファイル（生成物/バイナリ等）`,
+    );
     for (const f of ctx.excludedFiles) {
       lines.push(`- ${f}`);
     }
@@ -49,7 +53,9 @@ export function formatSummary(final: FinalDoc, ctx: Context): string {
 
   if (ctx.oversizedFiles.length > 0) {
     lines.push("");
-    lines.push(`レビュー対象外（大規模変更）: ${ctx.oversizedFiles.length} ファイル`);
+    lines.push(
+      `レビュー対象外（大規模変更）: ${ctx.oversizedFiles.length} ファイル`,
+    );
     for (const f of ctx.oversizedFiles) {
       lines.push(`- ${f}`);
     }

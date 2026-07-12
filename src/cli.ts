@@ -44,7 +44,7 @@ Options:
 class UsageError extends Error {}
 
 function isFlag(token: string | undefined): boolean {
-  return token !== undefined && token.startsWith("--");
+  return token?.startsWith("--") ?? false;
 }
 
 /**

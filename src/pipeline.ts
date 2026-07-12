@@ -6,21 +6,27 @@
 //   processFindings → [step4b スキップ] → llmMergeTexts → mergeFindings →
 //   llmVerifyIssues → applyVerdicts → 呼び出し側が出力
 import { applyVerdicts } from "./lib/apply-verdicts.ts";
-import { collectContext, type CollectContextOpts } from "./lib/collect-context.ts";
+import {
+  type CollectContextOpts,
+  collectContext,
+} from "./lib/collect-context.ts";
 import { buildDiffArgs } from "./lib/diff-anchor.ts";
 import { execFileAsync } from "./lib/exec.ts";
 import { mergeFindings } from "./lib/merge-findings.ts";
 import { processFindings } from "./lib/process-findings.ts";
 import type { Context, FinalDoc } from "./lib/types.ts";
-import { tierReducedClusters, validateClusters } from "./lib/validate-clusters.ts";
+import {
+  tierReducedClusters,
+  validateClusters,
+} from "./lib/validate-clusters.ts";
 import type { QueryFn } from "./llm/client.ts";
 import {
+  type DebugSink,
   defaultReadFile,
   llmMergeTexts,
   llmReviewAgents,
   llmSummaryAndClusters,
   llmVerifyIssues,
-  type DebugSink,
 } from "./llm/steps.ts";
 
 type Exec = typeof execFileAsync;
@@ -54,7 +60,9 @@ export async function runLocalReview(
 
   const debug: DebugSink = runOpts.debug
     ? (label, obj) => {
-        process.stderr.write(`[debug] ${label}:\n${JSON.stringify(obj, null, 2)}\n`);
+        process.stderr.write(
+          `[debug] ${label}:\n${JSON.stringify(obj, null, 2)}\n`,
+        );
       }
     : () => {};
 
@@ -63,7 +71,9 @@ export async function runLocalReview(
   debug("ctx", ctx);
 
   // 2. diff 取得（統一 diff。以降の全ステップがこの diff を使う）。
-  const diffResult = await exec("git", buildDiffArgs(ctx), { maxBuffer: DIFF_MAX_BUFFER });
+  const diffResult = await exec("git", buildDiffArgs(ctx), {
+    maxBuffer: DIFF_MAX_BUFFER,
+  });
   const diffText = diffResult.stdout;
 
   if (diffText.trim() === "") {
@@ -83,17 +93,28 @@ export async function runLocalReview(
   if (ctx.source === "staged") {
     authorInfo = `ステージ済み変更・コミットなし。${DIFF_ONLY_AUTHOR_INFO}`;
   } else if (ctx.range) {
-    const logResult = await exec("git", ["log", "--format=%H%n%s%n%b%n---", ctx.range]);
-    authorInfo = logResult.stdout.trim() || `（コミットメッセージなし）${DIFF_ONLY_AUTHOR_INFO}`;
+    const logResult = await exec("git", [
+      "log",
+      "--format=%H%n%s%n%b%n---",
+      ctx.range,
+    ]);
+    authorInfo =
+      logResult.stdout.trim() ||
+      `（コミットメッセージなし）${DIFF_ONLY_AUTHOR_INFO}`;
   } else {
     authorInfo = `（コミットメッセージなし）${DIFF_ONLY_AUTHOR_INFO}`;
   }
 
   // 4. サマリ + クラスタ分割案。
-  const { summary, rawClusters } = await llmSummaryAndClusters(ctx, diffText, authorInfo, {
-    query,
-    debug,
-  });
+  const { summary, rawClusters } = await llmSummaryAndClusters(
+    ctx,
+    diffText,
+    authorInfo,
+    {
+      query,
+      debug,
+    },
+  );
   debug("summary", summary);
 
   // 5. clusters 確定。normal のみ LLM 出力を検証、それ以外は決定論的縮退。
@@ -130,7 +151,10 @@ export async function runLocalReview(
   debug("issuesDoc", issuesDoc);
 
   // 11. 検証。
-  const verdicts = await llmVerifyIssues(issuesDoc.issues, diffText, summary, { query, debug });
+  const verdicts = await llmVerifyIssues(issuesDoc.issues, diffText, summary, {
+    query,
+    debug,
+  });
   debug("verdicts", verdicts);
 
   // 12. FINAL 生成。

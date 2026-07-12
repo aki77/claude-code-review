@@ -85,7 +85,9 @@ const doc: FindingsDoc = {
 
 describe("mergeFindings", () => {
   it("複数メンバーグループは LLM 統合文章を採用し、ruleRefs は和集合", () => {
-    const { issues } = mergeFindings(doc, [{ groupId: "g1", title: "統合", body: "統合本文" }]);
+    const { issues } = mergeFindings(doc, [
+      { groupId: "g1", title: "統合", body: "統合本文" },
+    ]);
     const g1 = issues.find((i) => i.id === "g1")!;
     expect(g1.title).toBe("統合");
     expect(g1.body).toBe("統合本文");
@@ -96,14 +98,18 @@ describe("mergeFindings", () => {
   });
 
   it("グループの category/severity をそのまま機械転写する（LLM の統合文章と独立）", () => {
-    const { issues } = mergeFindings(doc, [{ groupId: "g1", title: "統合", body: "統合本文" }]);
+    const { issues } = mergeFindings(doc, [
+      { groupId: "g1", title: "統合", body: "統合本文" },
+    ]);
     const g1 = issues.find((i) => i.id === "g1")!;
     expect(g1.category).toBe("security");
     expect(g1.severity).toBe("critical");
   });
 
   it("singleton グループは唯一メンバーの title/body を自動コピー", () => {
-    const { issues } = mergeFindings(doc, [{ groupId: "g1", title: "統合", body: "統合本文" }]);
+    const { issues } = mergeFindings(doc, [
+      { groupId: "g1", title: "統合", body: "統合本文" },
+    ]);
     const g2 = issues.find((i) => i.id === "g2")!;
     expect(g2.title).toBe("T3");
     expect(g2.body).toBe("B3");
@@ -115,13 +121,17 @@ describe("mergeFindings", () => {
   });
 
   it("resolved なグループには reason が載らない", () => {
-    const { issues } = mergeFindings(doc, [{ groupId: "g1", title: "統合", body: "統合本文" }]);
+    const { issues } = mergeFindings(doc, [
+      { groupId: "g1", title: "統合", body: "統合本文" },
+    ]);
     const g1 = issues.find((i) => i.id === "g1")!;
     expect("reason" in g1).toBe(false);
   });
 
   it("エラー: needsMergeText グループに文章が無い", () => {
-    expect(() => mergeFindings(doc, [])).toThrow(/統合文章が供給されていません/);
+    expect(() => mergeFindings(doc, [])).toThrow(
+      /統合文章が供給されていません/,
+    );
   });
 
   it("エラー: 未知の groupId", () => {
@@ -152,7 +162,9 @@ describe("mergeFindings", () => {
   });
 
   it("エラー: title/body 空", () => {
-    expect(() => mergeFindings(doc, [{ groupId: "g1", title: "  ", body: "b" }])).toThrow(/title\/body/);
+    expect(() =>
+      mergeFindings(doc, [{ groupId: "g1", title: "  ", body: "b" }]),
+    ).toThrow(/title\/body/);
   });
 
   it("エラー: stdin が配列でない", () => {
@@ -160,7 +172,15 @@ describe("mergeFindings", () => {
   });
 
   it("stats を集計する", () => {
-    const { stats } = mergeFindings(doc, [{ groupId: "g1", title: "t", body: "b" }]);
-    expect(stats).toEqual({ groups: 2, issues: 2, merged: 1, resolved: 1, unresolved: 1 });
+    const { stats } = mergeFindings(doc, [
+      { groupId: "g1", title: "t", body: "b" },
+    ]);
+    expect(stats).toEqual({
+      groups: 2,
+      issues: 2,
+      merged: 1,
+      resolved: 1,
+      unresolved: 1,
+    });
   });
 });

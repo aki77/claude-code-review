@@ -11,7 +11,15 @@ export const MAX_CLUSTERS = 3;
 
 // 単一クラスタ（全変更ファイル）を作る。縮退先。
 function singleCluster(changedFiles: string[]): Cluster[] {
-  return [{ id: 1, theme: "全変更ファイル", changedFiles: [...changedFiles], symbols: [], contextHints: [] }];
+  return [
+    {
+      id: 1,
+      theme: "全変更ファイル",
+      changedFiles: [...changedFiles],
+      symbols: [],
+      contextHints: [],
+    },
+  ];
 }
 
 // tier（tiny/small）による決定論的な単一クラスタ縮退の結果を作る純粋関数。
@@ -32,7 +40,10 @@ export function tierReducedClusters(changedFiles: string[]): ClustersDoc {
 //   changedFiles: CTX の変更ファイル配列（レビュー対象。除外済み）
 // 戻り値: { clusters, fallback, removedPaths, appendedPaths }
 //   fallback=true のとき単一クラスタへ縮退した（rawClusters が使い物にならなかった）。
-export function validateClusters(rawClusters: unknown, changedFiles: string[]): ClustersDoc {
+export function validateClusters(
+  rawClusters: unknown,
+  changedFiles: string[],
+): ClustersDoc {
   const changedSet = new Set(changedFiles);
   // 単一クラスタ縮退の唯一の生成点。removedPaths を先に宣言し（縮退前に溜まった分をそのまま
   // 携行する）、全ての縮退条件がこの1か所を呼ぶ。appendedPaths は縮退では常に空（全ファイルを
@@ -51,7 +62,12 @@ export function validateClusters(rawClusters: unknown, changedFiles: string[]): 
   }
   for (const c of rawClusters) {
     const rec = c as Record<string, unknown> | null;
-    if (!rec || typeof rec !== "object" || typeof rec.theme !== "string" || rec.theme.trim() === "") {
+    if (
+      !rec ||
+      typeof rec !== "object" ||
+      typeof rec.theme !== "string" ||
+      rec.theme.trim() === ""
+    ) {
       return bail();
     }
     if (!Array.isArray(rec.changedFiles)) {
@@ -60,19 +76,23 @@ export function validateClusters(rawClusters: unknown, changedFiles: string[]): 
   }
 
   // 修復: changedFiles を CTX と積集合（diff 外パスを除去）。symbols/contextHints を [] 補完。
-  const repaired = (rawClusters as Array<Record<string, unknown>>).map((rec) => {
-    const kept: string[] = [];
-    for (const p of rec.changedFiles as unknown[]) {
-      if (typeof p === "string" && changedSet.has(p)) kept.push(p);
-      else if (typeof p === "string") removedPaths.push(p);
-    }
-    return {
-      theme: rec.theme as string,
-      changedFiles: [...new Set(kept)],
-      symbols: Array.isArray(rec.symbols) ? (rec.symbols as string[]) : [],
-      contextHints: Array.isArray(rec.contextHints) ? (rec.contextHints as string[]) : [],
-    };
-  });
+  const repaired = (rawClusters as Array<Record<string, unknown>>).map(
+    (rec) => {
+      const kept: string[] = [];
+      for (const p of rec.changedFiles as unknown[]) {
+        if (typeof p === "string" && changedSet.has(p)) kept.push(p);
+        else if (typeof p === "string") removedPaths.push(p);
+      }
+      return {
+        theme: rec.theme as string,
+        changedFiles: [...new Set(kept)],
+        symbols: Array.isArray(rec.symbols) ? (rec.symbols as string[]) : [],
+        contextHints: Array.isArray(rec.contextHints)
+          ? (rec.contextHints as string[])
+          : [],
+      };
+    },
+  );
 
   // 空クラスタ（積集合で全ファイルが落ちた）を削除。
   let clusters = repaired.filter((c) => c.changedFiles.length > 0);
@@ -104,7 +124,9 @@ export function validateClusters(rawClusters: unknown, changedFiles: string[]): 
     if (covered.has(p)) continue;
     appendedPaths.push(p);
     // ファイル数最小のクラスタ（同数なら配列の先頭側）へ寄せる。
-    const target = clusters.reduce((a, b) => (a.changedFiles.length <= b.changedFiles.length ? a : b));
+    const target = clusters.reduce((a, b) =>
+      a.changedFiles.length <= b.changedFiles.length ? a : b,
+    );
     target.changedFiles.push(p);
     covered.add(p);
   }

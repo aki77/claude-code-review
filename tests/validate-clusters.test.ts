@@ -1,12 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { MAX_CLUSTERS, tierReducedClusters, validateClusters } from "../src/lib/validate-clusters.ts";
+import {
+  MAX_CLUSTERS,
+  tierReducedClusters,
+  validateClusters,
+} from "../src/lib/validate-clusters.ts";
 
 const changed = ["a.js", "b.js", "c.js", "d.js"];
 
 describe("validateClusters", () => {
   it("正常通過: 全ファイルをカバーする2クラスタはそのまま", () => {
     const raw = [
-      { id: 1, theme: "T1", changedFiles: ["a.js", "b.js"], symbols: ["f"], contextHints: ["x.js"] },
+      {
+        id: 1,
+        theme: "T1",
+        changedFiles: ["a.js", "b.js"],
+        symbols: ["f"],
+        contextHints: ["x.js"],
+      },
       { id: 2, theme: "T2", changedFiles: ["c.js", "d.js"] },
     ];
     const r = validateClusters(raw, changed);
@@ -25,7 +35,11 @@ describe("validateClusters", () => {
 
   it("縮退: 4クラスタ（3超過）は単一クラスタ", () => {
     expect(MAX_CLUSTERS).toBe(3);
-    const raw = [1, 2, 3, 4].map((n) => ({ id: n, theme: `T${n}`, changedFiles: [] }));
+    const raw = [1, 2, 3, 4].map((n) => ({
+      id: n,
+      theme: `T${n}`,
+      changedFiles: [],
+    }));
     const r = validateClusters(raw, changed);
     expect(r.fallback).toBe(true);
   });

@@ -28,7 +28,9 @@ export const fileHeaderRe = /^diff --git a\/(.+?) b\/(.+)$/;
 export function parseDiff(diffText: string): FilesByPath {
   const files: FilesByPath = new Map(); // path -> hunks[]
   let curPath: string | null = null;
-  let curHunk: { lines: { text: string; oldLine: number | null; newLine: number | null }[] } | null = null;
+  let curHunk: {
+    lines: { text: string; oldLine: number | null; newLine: number | null }[];
+  } | null = null;
   let oldLine = 0;
   let newLine = 0;
 
@@ -94,7 +96,9 @@ interface SideLine {
 
 // hunk 群から、指定 side（"new" or "old"）の行だけを行番号付きで平坦化する。
 export function sideLines(
-  hunks: { lines: { text: string; oldLine: number | null; newLine: number | null }[] }[],
+  hunks: {
+    lines: { text: string; oldLine: number | null; newLine: number | null }[];
+  }[],
   side: Side,
 ): SideLine[] {
   const out: SideLine[] = [];
@@ -115,7 +119,10 @@ interface MatchRange {
 // side 行列（{lineNo, norm}[]）に対し、needle（正規化済み文字列配列）が連続一致する
 // 箇所を探す。ちょうど 1 箇所だけ一致したとき { startLine, endLine } を返す。
 // 0 箇所または複数箇所（曖昧）は null。
-export function matchConsecutive(lines: SideLine[], needle: string[]): MatchRange | null {
+export function matchConsecutive(
+  lines: SideLine[],
+  needle: string[],
+): MatchRange | null {
   if (needle.length === 0) return null;
   const found: MatchRange[] = [];
   for (let i = 0; i + needle.length <= lines.length; i++) {

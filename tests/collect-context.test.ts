@@ -14,11 +14,17 @@ import {
 import type { Rule } from "../src/lib/types.ts";
 
 describe("fileMatchesPatterns", () => {
-  const matches = (file: string, pattern: string) => fileMatchesPatterns(file, [pattern]);
+  const matches = (file: string, pattern: string) =>
+    fileMatchesPatterns(file, [pattern]);
 
   it("** はディレクトリを跨いでマッチする", () => {
     expect(matches("app/views/x.erb", "app/views/**/*")).toBe(true);
-    expect(matches("app/views/active_storage/blobs/_blob.html.erb", "app/views/**/*")).toBe(true);
+    expect(
+      matches(
+        "app/views/active_storage/blobs/_blob.html.erb",
+        "app/views/**/*",
+      ),
+    ).toBe(true);
     expect(matches("app/models/x.rb", "app/views/**/*")).toBe(false);
   });
 
@@ -58,8 +64,12 @@ describe("parseFrontmatterPaths", () => {
   });
 
   it("ブロック形式の paths を配列で返す", () => {
-    const fm = "---\npaths:\n  - 'app/models/**/*.rb'\n  - \"config/routes.rb\"\n---\nbody";
-    expect(parseFrontmatterPaths(fm)).toEqual(["app/models/**/*.rb", "config/routes.rb"]);
+    const fm =
+      "---\npaths:\n  - 'app/models/**/*.rb'\n  - \"config/routes.rb\"\n---\nbody";
+    expect(parseFrontmatterPaths(fm)).toEqual([
+      "app/models/**/*.rb",
+      "config/routes.rb",
+    ]);
   });
 
   it("インライン配列形式の paths を扱える", () => {
@@ -89,7 +99,9 @@ describe("buildAssignments", () => {
   });
 
   it("単一グループは2バケットへ均等割り", () => {
-    expect(fileCounts(build(["a.txt", "b.txt", "c.txt", "d.txt"]))).toEqual([2, 2]);
+    expect(fileCounts(build(["a.txt", "b.txt", "c.txt", "d.txt"]))).toEqual([
+      2, 2,
+    ]);
   });
 
   it("巨大な共通グループ + 小グループ2つを均等化（#780型）", () => {
@@ -114,14 +126,20 @@ describe("buildAssignments", () => {
     const a = build(files);
     const counts = fileCounts(a).sort((x, y) => y - x);
     expect(counts).toEqual([17, 6]);
-    const configBucket = a.find((b) => b.files.some((f) => f.path.startsWith("config/")));
+    const configBucket = a.find((b) =>
+      b.files.some((f) => f.path.startsWith("config/")),
+    );
     expect(bucketRuleUnion(configBucket!).has("app-views")).toBe(false);
   });
 
   it("各ファイルに適用ルールが付与される", () => {
     const a = build(["models/user.rb"]);
-    const file = a.flatMap((b) => b.files).find((f) => f.path === "models/user.rb");
-    expect(file?.rules.slice().sort()).toEqual(["CLAUDE.md", "app-models", "comment"].sort());
+    const file = a
+      .flatMap((b) => b.files)
+      .find((f) => f.path === "models/user.rb");
+    expect(file?.rules.slice().sort()).toEqual(
+      ["CLAUDE.md", "app-models", "comment"].sort(),
+    );
   });
 
   it("tiny は全ファイルを buckets[0] に寄せて buckets[1] を空にする", () => {
@@ -171,7 +189,10 @@ describe("parseNumstat", () => {
     const out = "10\t5\tsrc/a.ts\n2\t0\tspec/b.rb\n";
     const rows = parseNumstat(out);
     expect(rows).toHaveLength(2);
-    const total = rows.reduce((s, r) => s + (r.added ?? 0) + (r.deleted ?? 0), 0);
+    const total = rows.reduce(
+      (s, r) => s + (r.added ?? 0) + (r.deleted ?? 0),
+      0,
+    );
     expect(total).toBe(17);
   });
 
@@ -276,7 +297,12 @@ describe("buildExcludeArgs", () => {
 
   it("複数パスを git 向け引数に組み立てる", () => {
     const args = buildExcludeArgs(["dist/a.js", "b.png"]);
-    expect(args.git).toEqual(["--", ".", ":(exclude)dist/a.js", ":(exclude)b.png"]);
+    expect(args.git).toEqual([
+      "--",
+      ".",
+      ":(exclude)dist/a.js",
+      ":(exclude)b.png",
+    ]);
   });
 });
 
@@ -290,7 +316,11 @@ describe("splitOversized", () => {
       ["b.rb", stat(1000)], // ちょうど → レビュー対象に残す（strictly greater）
       ["c.rb", stat(10)], // 通常
     ]);
-    const { changedFiles, oversizedFiles } = splitOversized(kept, perFile, 1000);
+    const { changedFiles, oversizedFiles } = splitOversized(
+      kept,
+      perFile,
+      1000,
+    );
     expect(oversizedFiles).toEqual(["a.rb"]);
     expect(changedFiles).toEqual(["b.rb", "c.rb"]);
   });
@@ -306,7 +336,11 @@ describe("splitOversized", () => {
     // numstat が rename を `old => new` で出し kept の新パスと一致しないケースの安全側挙動。
     const kept = ["src/renamed.rb"];
     const perFile = new Map([["src/old.rb => src/renamed.rb", stat(5000)]]);
-    const { changedFiles, oversizedFiles } = splitOversized(kept, perFile, 1000);
+    const { changedFiles, oversizedFiles } = splitOversized(
+      kept,
+      perFile,
+      1000,
+    );
     expect(oversizedFiles).toEqual([]);
     expect(changedFiles).toEqual(["src/renamed.rb"]);
   });
@@ -327,7 +361,11 @@ describe("splitOversized", () => {
       ["a.rb", stat(3000)],
       ["b.rb", stat(3000)],
     ]);
-    const { changedFiles, oversizedFiles } = splitOversized(kept, perFile, 1000);
+    const { changedFiles, oversizedFiles } = splitOversized(
+      kept,
+      perFile,
+      1000,
+    );
     expect(changedFiles).toEqual([]);
     expect(oversizedFiles).toEqual(["a.rb", "b.rb"]);
   });
@@ -342,12 +380,20 @@ describe("splitOversized", () => {
     ]);
     const { oversizedFiles } = splitOversized(kept, perFile, 1000);
     const args = buildExcludeArgs([...excludedFiles, ...oversizedFiles]);
-    expect(args.git).toEqual(["--", ".", ":(exclude)dist/bundle.js", ":(exclude)src/big.rb"]);
+    expect(args.git).toEqual([
+      "--",
+      ".",
+      ":(exclude)dist/bundle.js",
+      ":(exclude)src/big.rb",
+    ]);
   });
 });
 
 describe("resolvePrBaseRange", () => {
-  type Stub = (cmd: string, args: string[]) => Promise<{ stdout: string; stderr: string; code: number }>;
+  type Stub = (
+    cmd: string,
+    args: string[],
+  ) => Promise<{ stdout: string; stderr: string; code: number }>;
 
   it("正常系は <baseRefOid>...HEAD を返す", async () => {
     const exec: Stub = async (cmd) => {
@@ -361,7 +407,9 @@ describe("resolvePrBaseRange", () => {
       // git cat-file / merge-base はどちらも成功
       return { stdout: "", stderr: "", code: 0 };
     };
-    await expect(resolvePrBaseRange("7", { exec })).resolves.toBe("abc123...HEAD");
+    await expect(resolvePrBaseRange("7", { exec })).resolves.toBe(
+      "abc123...HEAD",
+    );
   });
 
   it("base コミット不在は fetch 指示を含めて throw", async () => {
@@ -378,7 +426,9 @@ describe("resolvePrBaseRange", () => {
       }
       return { stdout: "", stderr: "", code: 0 };
     };
-    await expect(resolvePrBaseRange("7", { exec })).rejects.toThrow(/git fetch origin main/);
+    await expect(resolvePrBaseRange("7", { exec })).rejects.toThrow(
+      /git fetch origin main/,
+    );
   });
 
   it("merge-base 不能（shallow）は --unshallow を含めて throw", async () => {
@@ -395,17 +445,25 @@ describe("resolvePrBaseRange", () => {
       }
       return { stdout: "", stderr: "", code: 0 };
     };
-    await expect(resolvePrBaseRange("7", { exec })).rejects.toThrow(/--unshallow/);
+    await expect(resolvePrBaseRange("7", { exec })).rejects.toThrow(
+      /--unshallow/,
+    );
   });
 
   it("baseRefOid 欠落は throw", async () => {
     const exec: Stub = async (cmd) => {
       if (cmd === "gh") {
-        return { stdout: JSON.stringify({ baseRefName: "main" }), stderr: "", code: 0 };
+        return {
+          stdout: JSON.stringify({ baseRefName: "main" }),
+          stderr: "",
+          code: 0,
+        };
       }
       return { stdout: "", stderr: "", code: 0 };
     };
-    await expect(resolvePrBaseRange("7", { exec })).rejects.toThrow(/baseRefOid/);
+    await expect(resolvePrBaseRange("7", { exec })).rejects.toThrow(
+      /baseRefOid/,
+    );
   });
 
   it("不正 JSON は throw", async () => {

@@ -23,7 +23,7 @@ const buildDiff = () =>
     "--- /dev/null",
     `+++ b/${path}`,
     `@@ -0,0 +1,${bodyLines.length} @@`,
-    ...bodyLines.map((l) => "+" + l),
+    ...bodyLines.map((l) => `+${l}`),
   ].join("\n");
 
 describe("diff-anchor", () => {
@@ -34,7 +34,9 @@ describe("diff-anchor", () => {
     const newLines = sideLines(hunks!, "new");
     expect(newLines[0]!.lineNo).toBe(1);
     expect(newLines[0]!.norm).toBe("export function first() {}");
-    const target = newLines.find((l) => l.norm === "export function target() {}");
+    const target = newLines.find(
+      (l) => l.norm === "export function target() {}",
+    );
     expect(target!.lineNo).toBe(4);
   });
 
@@ -68,9 +70,16 @@ describe("diff-anchor", () => {
 
   it("resolveAnchor: 単一行アンカーは line と side のみ（startLine なし）", () => {
     const files = parseDiff(buildDiff());
-    const r = resolveAnchor({ path, existingCode: "const UNIQUE_MARKER = 1;" }, files);
+    const r = resolveAnchor(
+      { path, existingCode: "const UNIQUE_MARKER = 1;" },
+      files,
+    );
     expect(r.resolved).toBe(true);
-    expect((r as { params: unknown }).params).toEqual({ line: 5, side: "RIGHT", subjectType: "LINE" });
+    expect((r as { params: unknown }).params).toEqual({
+      line: 5,
+      side: "RIGHT",
+      subjectType: "LINE",
+    });
   });
 
   it("正規化: インデント差・diff マーカー付き入力でも一致する", () => {
@@ -81,7 +90,9 @@ describe("diff-anchor", () => {
     );
     expect(r.resolved).toBe(true);
     expect((r as { params: { line: number } }).params.line).toBe(4);
-    expect((r as { params: { subjectType: string } }).params.subjectType).toBe("LINE");
+    expect((r as { params: { subjectType: string } }).params.subjectType).toBe(
+      "LINE",
+    );
   });
 
   it("resolveAnchor: 不一致の existingCode は resolved:false", () => {
@@ -111,7 +122,10 @@ describe("diff-anchor", () => {
 
   it("resolveAnchor: 差分にないファイルは resolved:false", () => {
     const files = parseDiff(buildDiff());
-    const r = resolveAnchor({ path: "src/other.js", existingCode: "anything" }, files);
+    const r = resolveAnchor(
+      { path: "src/other.js", existingCode: "anything" },
+      files,
+    );
     expect(r.resolved).toBe(false);
     expect((r as { reason: string }).reason).toMatch(/差分が見つからない/);
   });
@@ -127,7 +141,10 @@ describe("diff-anchor", () => {
       " keep_after",
     ].join("\n");
     const files = parseDiff(diff);
-    const r = resolveAnchor({ path: "src/edit.js", existingCode: "removed_line" }, files);
+    const r = resolveAnchor(
+      { path: "src/edit.js", existingCode: "removed_line" },
+      files,
+    );
     expect(r.resolved).toBe(true);
     expect((r as { side: string }).side).toBe("old");
     expect((r as { params: { line: number } }).params.line).toBe(11);
@@ -147,15 +164,26 @@ describe("diff-anchor", () => {
     ].join("\n");
     const files = parseDiff(diff);
     expect(files.get(nonAsciiPath)).toBeTruthy();
-    const r = resolveAnchor({ path: nonAsciiPath, existingCode: "# 見出し" }, files);
+    const r = resolveAnchor(
+      { path: nonAsciiPath, existingCode: "# 見出し" },
+      files,
+    );
     expect(r.resolved).toBe(true);
     expect((r as { params: { line: number } }).params.line).toBe(1);
     expect((r as { params: { side: string } }).params.side).toBe("RIGHT");
   });
 
   it("buildDiffArgs: range モードは core.quotepath=false 付きで range を渡す", () => {
-    const args = buildDiffArgs({ diffArgs: ["abc123...HEAD"], excludeArgs: { git: [] } });
-    expect(args).toEqual(["-c", "core.quotepath=false", "diff", "abc123...HEAD"]);
+    const args = buildDiffArgs({
+      diffArgs: ["abc123...HEAD"],
+      excludeArgs: { git: [] },
+    });
+    expect(args).toEqual([
+      "-c",
+      "core.quotepath=false",
+      "diff",
+      "abc123...HEAD",
+    ]);
   });
 
   it("buildDiffArgs: staged モードと除外引数を連結する", () => {

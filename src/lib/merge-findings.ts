@@ -10,32 +10,43 @@
 import type { FindingsDoc, Issue, IssuesDoc, MergeText } from "./types.ts";
 
 // findingsDoc（FINDINGS の中身）と mergeTexts（LLM 統合文章配列）から ISSUES を組み立てる純粋関数。
-export function mergeFindings(findingsDoc: FindingsDoc, mergeTexts: unknown): IssuesDoc {
+export function mergeFindings(
+  findingsDoc: FindingsDoc,
+  mergeTexts: unknown,
+): IssuesDoc {
   const { findings, groups } = findingsDoc;
   const findingById = new Map(findings.map((f) => [f.id, f]));
 
   if (!Array.isArray(mergeTexts)) {
-    throw new Error("stdin は [{groupId, title, body}] の配列である必要があります");
+    throw new Error(
+      "stdin は [{groupId, title, body}] の配列である必要があります",
+    );
   }
 
   // 統合文章を groupId で引けるようにしつつ、重複・未知・欠落を検証する。
   // needTextGroups（needsMergeText:true）が「文章が必要なグループ」の唯一の真。既知グループの
   // うちこれに含まれないものは singleton として扱う。
   const textByGroup = new Map<string, MergeText>();
-  const needTextGroups = new Set(groups.filter((g) => g.needsMergeText).map((g) => g.id));
+  const needTextGroups = new Set(
+    groups.filter((g) => g.needsMergeText).map((g) => g.id),
+  );
   const knownGroups = new Set(groups.map((g) => g.id));
 
   for (const t of mergeTexts as unknown[]) {
     const rec = t as Record<string, unknown> | null;
     if (!rec || typeof rec.groupId !== "string") {
-      throw new Error("統合文章の各要素は groupId（文字列）を持つ必要があります");
+      throw new Error(
+        "統合文章の各要素は groupId（文字列）を持つ必要があります",
+      );
     }
     const { groupId } = rec;
     if (!knownGroups.has(groupId)) {
       throw new Error(`未知の groupId: ${groupId}`);
     }
     if (!needTextGroups.has(groupId)) {
-      throw new Error(`groupId=${groupId} は単一メンバーのため統合文章は不要です（自動コピーされます）`);
+      throw new Error(
+        `groupId=${groupId} は単一メンバーのため統合文章は不要です（自動コピーされます）`,
+      );
     }
     if (textByGroup.has(groupId)) {
       throw new Error(`groupId=${groupId} の統合文章が重複しています`);
@@ -47,14 +58,18 @@ export function mergeFindings(findingsDoc: FindingsDoc, mergeTexts: unknown): Is
       typeof body !== "string" ||
       body.trim() === ""
     ) {
-      throw new Error(`groupId=${groupId} の統合文章は title/body（非空文字列）が必要です`);
+      throw new Error(
+        `groupId=${groupId} の統合文章は title/body（非空文字列）が必要です`,
+      );
     }
     textByGroup.set(groupId, { groupId, title, body });
   }
   // needsMergeText:true の全グループに文章が供給されているか。
   for (const gid of needTextGroups) {
     if (!textByGroup.has(gid)) {
-      throw new Error(`groupId=${gid} は複数メンバーですが統合文章が供給されていません`);
+      throw new Error(
+        `groupId=${gid} は複数メンバーですが統合文章が供給されていません`,
+      );
     }
   }
 

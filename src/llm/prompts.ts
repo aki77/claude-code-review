@@ -74,7 +74,14 @@ export const FINDINGS_SCHEMA: JSONSchema = {
             enum: ["critical", "high", "medium", "low"],
           },
         },
-        required: ["path", "title", "body", "existingCode", "category", "severity"],
+        required: [
+          "path",
+          "title",
+          "body",
+          "existingCode",
+          "category",
+          "severity",
+        ],
       },
     },
   },
@@ -120,17 +127,21 @@ const EXISTING_CODE_INSTRUCTION =
   "existingCode には diff に実在する連続コード片を逐語コピーしてください（行番号は書かない）。" +
   "追加行と削除行を1つのアンカーに混在させないこと。";
 
-function joinFileTexts(files: { path: string; content: string | null }[]): string {
+function joinFileTexts(
+  files: { path: string; content: string | null }[],
+): string {
   const available = files.filter((f) => f.content !== null);
   if (available.length === 0) return NO_CONTEXT_NOTE;
-  return available
-    .map((f) => `--- ${f.path} ---\n${f.content}`)
-    .join("\n\n");
+  return available.map((f) => `--- ${f.path} ---\n${f.content}`).join("\n\n");
 }
 
 // ---- step2: サマリ + 影響クラスタ分割 ----------------------------------------
 
-export function summaryClustersSystem({ wantClusters }: { wantClusters: boolean }): string {
+export function summaryClustersSystem({
+  wantClusters,
+}: {
+  wantClusters: boolean;
+}): string {
   const base =
     "あなたはコードレビューの準備を行うアシスタントです。与えられたコミット情報/diff から、" +
     "変更の意図・全体像・主要な変更点を要約してください。";
@@ -162,11 +173,7 @@ export function summaryClustersUser({
   const clusterNote = wantClusters
     ? ""
     : "\n\nclusters は空配列 [] を返してください（分割は不要です）。";
-  return (
-    `## 著者意図情報\n${authorInfo}\n\n` +
-    `## 差分\n${diffText}` +
-    clusterNote
-  );
+  return `## 著者意図情報\n${authorInfo}\n\n## 差分\n${diffText}${clusterNote}`;
 }
 
 // ---- agent1/2: プロジェクトルール準拠チェック --------------------------------
@@ -198,7 +205,10 @@ export function ruleAgentUser({
   diffText: string;
 }): string {
   const filesList = assignment.files
-    .map((f) => `- ${f.path} (rules: ${f.rules.length > 0 ? f.rules.join(", ") : "なし"})`)
+    .map(
+      (f) =>
+        `- ${f.path} (rules: ${f.rules.length > 0 ? f.rules.join(", ") : "なし"})`,
+    )
     .join("\n");
   return (
     `あなたはエージェント${agent}です。\n\n` +
@@ -333,7 +343,10 @@ export function mergeTextUser({
   members: { title?: string; body?: string }[];
 }): string {
   const list = members
-    .map((m, i) => `### 指摘${i + 1}\ntitle: ${m.title ?? ""}\nbody: ${m.body ?? ""}`)
+    .map(
+      (m, i) =>
+        `### 指摘${i + 1}\ntitle: ${m.title ?? ""}\nbody: ${m.body ?? ""}`,
+    )
     .join("\n\n");
   return `以下の複数の指摘を1件に統合し、title と body を返してください。\n\n${list}`;
 }

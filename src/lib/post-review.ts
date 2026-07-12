@@ -28,17 +28,22 @@ function toComment(issue: Issue, body: string): RestComment {
   const params = issue.params as Params;
   const comment: RestComment = { path: issue.path, body, line: params.line };
   if (params.side != null) comment.side = params.side;
-  if ("startLine" in params && params.startLine != null) comment.start_line = params.startLine;
-  if ("startSide" in params && params.startSide != null) comment.start_side = params.startSide;
+  if ("startLine" in params && params.startLine != null)
+    comment.start_line = params.startLine;
+  if ("startSide" in params && params.startSide != null)
+    comment.start_side = params.startSide;
   return comment;
 }
 
 // suggestion 入力を行配列へ正規化する（string[] / 改行区切り文字列の両方を受ける）。
 // 末尾の空行は落とすが、途中の空行は保持する（コードの一部になりうるため）。
 function toSuggestionLines(suggestion: string | string[]): string[] {
-  const arr = Array.isArray(suggestion) ? suggestion : String(suggestion).split("\n");
+  const arr = Array.isArray(suggestion)
+    ? suggestion
+    : String(suggestion).split("\n");
   const lines = arr.map((l) => String(l));
-  while (lines.length > 0 && lines[lines.length - 1]?.trim() === "") lines.pop();
+  while (lines.length > 0 && lines[lines.length - 1]?.trim() === "")
+    lines.pop();
   return lines;
 }
 
@@ -54,7 +59,9 @@ function withStrippedNote(commentBody: string, reason: string): string {
   return `${(commentBody ?? "").trimEnd()}${note}`.trim();
 }
 
-export type SuggestionResult = { ok: true; body: string } | { ok: false; reason: string };
+export type SuggestionResult =
+  | { ok: true; body: string }
+  | { ok: false; reason: string };
 
 // suggestion を機械検証し、安全なら ```suggestion フェンス付き本文を、危険なら reason を返す
 // （呼び出し側は ok:false なら suggestion を捨てて commentBody のみ投稿する = fail-closed）。
@@ -77,21 +84,31 @@ export function buildSuggestionBody(
   suggestion: string | string[],
   deleteLines?: string[],
 ): SuggestionResult {
-  if (Array.isArray(issue.sourceFindingIds) && issue.sourceFindingIds.length >= 2) {
+  if (
+    Array.isArray(issue.sourceFindingIds) &&
+    issue.sourceFindingIds.length >= 2
+  ) {
     return {
       ok: false,
-      reason: "複数メンバーの統合 issue には suggestion を付けられません（アンカーが範囲全体を表さない）",
+      reason:
+        "複数メンバーの統合 issue には suggestion を付けられません（アンカーが範囲全体を表さない）",
     };
   }
   const existingLines = splitAndNormalize(issue.existingCode ?? "");
   if (existingLines.length === 0) {
-    return { ok: false, reason: "existingCode が空で suggestion を検証できません" };
+    return {
+      ok: false,
+      reason: "existingCode が空で suggestion を検証できません",
+    };
   }
   // 範囲行数と existingCode 行数の一致確認。singleton では resolveAnchor が
   // splitAndNormalize(existingCode) を diff にマッチさせて params を作るため、通常この2つは
   // 一致する。ここは resolveAnchor の不変条件を投稿直前に念のため確認する fail-closed の防波堤。
   if (rangeLineCount(issue.params as Params) !== existingLines.length) {
-    return { ok: false, reason: "params の範囲行数と existingCode の行数が一致しません" };
+    return {
+      ok: false,
+      reason: "params の範囲行数と existingCode の行数が一致しません",
+    };
   }
 
   const sugLines = toSuggestionLines(suggestion);
@@ -102,7 +119,9 @@ export function buildSuggestionBody(
     // 行削除が起きる。消える行（既存行のうち suggestion 正規化集合に無いもの）を deleteLines で
     // 明示していないと危険なので捨てる。
     const sugNorm = new Set(sugNormLines);
-    const deleteSet = new Set(splitAndNormalize((deleteLines ?? []).join("\n")));
+    const deleteSet = new Set(
+      splitAndNormalize((deleteLines ?? []).join("\n")),
+    );
     const vanishing = existingLines.filter((l) => !sugNorm.has(l));
     const unexpected = vanishing.filter((l) => !deleteSet.has(l));
     if (unexpected.length > 0) {
@@ -139,13 +158,17 @@ export function buildPayload(
   }
   const { comments } = input;
   if (!Array.isArray(comments)) {
-    throw new Error("comments は配列である必要があります（[{id, body}] を渡してください）");
+    throw new Error(
+      "comments は配列である必要があります（[{id, body}] を渡してください）",
+    );
   }
 
   const issues = finalDoc.issues ?? [];
   const issueById = new Map(issues.map((i) => [i.id, i]));
   // インライン投稿できる（=行番号が確定している）confirmed issue の集合。
-  const resolvedIds = new Set(issues.filter((i) => i.resolved).map((i) => i.id));
+  const resolvedIds = new Set(
+    issues.filter((i) => i.resolved).map((i) => i.id),
+  );
 
   const restComments: RestComment[] = [];
   const seen = new Set<string>();
@@ -155,7 +178,9 @@ export function buildPayload(
     }
     const issue = issueById.get(c.id);
     if (!issue) {
-      throw new Error(`comments[${i}] の id=${c.id} は FINAL の confirmed issue に存在しません`);
+      throw new Error(
+        `comments[${i}] の id=${c.id} は FINAL の confirmed issue に存在しません`,
+      );
     }
     if (seen.has(c.id)) {
       throw new Error(`comments[${i}] の id=${c.id} が重複しています`);
@@ -175,7 +200,9 @@ export function buildPayload(
     let body = c.commentBody;
     if (c.suggestion != null) {
       const r = buildSuggestionBody(issue, c.suggestion, c.deleteLines);
-      body = r.ok ? `${c.commentBody.trimEnd()}\n\n${r.body}` : withStrippedNote(c.commentBody, r.reason);
+      body = r.ok
+        ? `${c.commentBody.trimEnd()}\n\n${r.body}`
+        : withStrippedNote(c.commentBody, r.reason);
     }
     restComments.push(toComment(issue, body));
   });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { processFindings } from "../src/lib/process-findings.ts";
-import type { Ctx, Finding, FindingsDoc } from "../src/lib/types.ts";
+import type { Ctx, FindingsDoc } from "../src/lib/types.ts";
 
 const ctx: Ctx = {
   changedFiles: ["src/a.js", "src/b.js"],
@@ -28,8 +28,10 @@ const diffText = [
   "+gamma",
 ].join("\n");
 
-const run = (raw: unknown, opts: { ctx?: Ctx; prev?: FindingsDoc | null } = {}) =>
-  processFindings(raw, { ctx, diffText, ...opts });
+const run = (
+  raw: unknown,
+  opts: { ctx?: Ctx; prev?: FindingsDoc | null } = {},
+) => processFindings(raw, { ctx, diffText, ...opts });
 
 const bug = (over: Record<string, unknown> = {}) => ({
   agent: 3,
@@ -60,7 +62,10 @@ describe("processFindings", () => {
   });
 
   it("スキーマ検証: existingCode 欠落は invalid（全体は落とさない）", () => {
-    const { findings, stats } = run([bug(), { agent: 3, path: "src/a.js", title: "x", body: "y" }]);
+    const { findings, stats } = run([
+      bug(),
+      { agent: 3, path: "src/a.js", title: "x", body: "y" },
+    ]);
     expect(findings[1]!.status).toBe("invalid");
     expect(findings[1]!.errors!.join()).toMatch(/existingCode/);
     expect(stats.invalid).toBe(1);
@@ -122,11 +127,17 @@ describe("processFindings", () => {
 
   it("スコープ: excludedFiles は out-of-scope", () => {
     // excludedFiles は changedFiles に含まれない前提だが、両方に現れても弾く。
-    const c2: Ctx = { changedFiles: ["dist/x.min.js"], excludedFiles: ["dist/x.min.js"] };
-    const { findings } = processFindings([bug({ path: "dist/x.min.js", existingCode: "line2" })], {
-      ctx: c2,
-      diffText,
-    });
+    const c2: Ctx = {
+      changedFiles: ["dist/x.min.js"],
+      excludedFiles: ["dist/x.min.js"],
+    };
+    const { findings } = processFindings(
+      [bug({ path: "dist/x.min.js", existingCode: "line2" })],
+      {
+        ctx: c2,
+        diffText,
+      },
+    );
     expect(findings[0]!.status).toBe("out-of-scope");
   });
 
@@ -138,7 +149,13 @@ describe("processFindings", () => {
       rule({ agent: 2, existingCode: "line5" }),
       rule({ agent: 5, existingCode: "line1" }),
     ]);
-    expect(findings.map((f) => f.kind)).toEqual(["bug", "bug", "rule", "rule", "rule"]);
+    expect(findings.map((f) => f.kind)).toEqual([
+      "bug",
+      "bug",
+      "rule",
+      "rule",
+      "rule",
+    ]);
   });
 
   it("アンカー解決: 成功で resolved:true + params", () => {
@@ -174,13 +191,19 @@ describe("processFindings", () => {
   });
 
   it("グルーピング: 重ならない行範囲は別グループ", () => {
-    const { groups } = run([bug({ existingCode: "line1" }), bug({ existingCode: "line5" })]);
+    const { groups } = run([
+      bug({ existingCode: "line1" }),
+      bug({ existingCode: "line5" }),
+    ]);
     expect(groups.length).toBe(2);
     expect(groups[0]!.needsMergeText).toBe(false);
   });
 
   it("グルーピング: bug+rule 混在は bug（由来種別優先）", () => {
-    const { groups } = run([bug({ existingCode: "line2" }), rule({ existingCode: "line2" })]);
+    const { groups } = run([
+      bug({ existingCode: "line2" }),
+      rule({ existingCode: "line2" }),
+    ]);
     expect(groups.length).toBe(1);
     expect(groups[0]!.kind).toBe("bug");
   });
@@ -226,14 +249,20 @@ describe("processFindings", () => {
   });
 
   it("グルーピング: 未解決の同一アンカー完全一致は統合", () => {
-    const { groups } = run([bug({ existingCode: "ghost" }), bug({ existingCode: "ghost" })]);
+    const { groups } = run([
+      bug({ existingCode: "ghost" }),
+      bug({ existingCode: "ghost" }),
+    ]);
     expect(groups.length).toBe(1);
     expect(groups[0]!.resolved).toBe(false);
     expect(groups[0]!.needsMergeText).toBe(true);
   });
 
   it("グルーピング: 未解決でもアンカーが違えば別グループ", () => {
-    const { groups } = run([bug({ existingCode: "ghost1" }), bug({ existingCode: "ghost2" })]);
+    const { groups } = run([
+      bug({ existingCode: "ghost1" }),
+      bug({ existingCode: "ghost2" }),
+    ]);
     expect(groups.length).toBe(2);
   });
 
@@ -253,7 +282,10 @@ describe("processFindings", () => {
   });
 
   it("--retry: パッチに無い finding は維持される", () => {
-    const first = run([bug({ existingCode: "line2" }), bug({ existingCode: "wrong" })]);
+    const first = run([
+      bug({ existingCode: "line2" }),
+      bug({ existingCode: "wrong" }),
+    ]);
     const retried = run([{ id: "f2", existingCode: "line4" }], { prev: first });
     expect(retried.findings[0]!.resolved).toBe(true); // f1 は元のまま
     expect(retried.findings[0]!.params!.line).toBe(2);
@@ -262,7 +294,10 @@ describe("processFindings", () => {
   });
 
   it("決定論性: 同一入力 → 同一出力", () => {
-    const input = [bug({ existingCode: "line2" }), rule({ existingCode: "line4" })];
+    const input = [
+      bug({ existingCode: "line2" }),
+      rule({ existingCode: "line4" }),
+    ];
     const r1 = JSON.stringify(run(input));
     const r2 = JSON.stringify(run(input));
     expect(r1).toBe(r2);

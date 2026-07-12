@@ -15,13 +15,18 @@
 //
 // main()（CLI 化・git execFileSync・artifact I/O）は移植しない（Phase 4）。
 // 純関数部分のみ移植し、git 取得は diffText 引数注入に置換。
-import { lineRange, parseDiff, resolveAnchor, splitAndNormalize } from "./diff-anchor.ts";
+import {
+  lineRange,
+  parseDiff,
+  resolveAnchor,
+  splitAndNormalize,
+} from "./diff-anchor.ts";
 import type {
   Category,
   Ctx,
+  FilesByPath,
   Finding,
   FindingsDoc,
-  FilesByPath,
   Group,
   Params,
   Severity,
@@ -39,18 +44,35 @@ export const RULE_AGENTS = new Set([1, 2, 5]);
 // ルール準拠・REVIEW.md準拠系（agent 1,2,5）由来。この対応は validateFinding が双方向で
 // 機械的に強制する（agent 3/4 が rule-violation を自己申告しても invalid で弾かれる）。
 // severity は4段（info は入れない）。
-export const VALID_CATEGORIES = new Set(["bug", "security", "performance", "rule-violation"]);
+export const VALID_CATEGORIES = new Set([
+  "bug",
+  "security",
+  "performance",
+  "rule-violation",
+]);
 export const VALID_SEVERITIES = new Set(["critical", "high", "medium", "low"]);
 
 // category の重要度優先順位（グループ集約で最重要度を選ぶ際に使う）。
-export const CATEGORY_PRIORITY: Record<string, number> = { security: 0, bug: 1, performance: 2 };
+export const CATEGORY_PRIORITY: Record<string, number> = {
+  security: 0,
+  bug: 1,
+  performance: 2,
+};
 // severity の重大度優先順位（グループ集約で最大深刻度を選ぶ際に使う）。
-export const SEVERITY_PRIORITY: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+export const SEVERITY_PRIORITY: Record<string, number> = {
+  critical: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
+};
 
 // values のうち priority テーブルで最優先（数値最小）のものを1つ返す。
 // テーブルに無い値は無視する（呼び出し側が事前にスキーマ検証済みのため通常は起こらない）。
 // 該当する値が1つも無ければ undefined を返す（呼び出し側が扱う）。
-function pickTop<T extends string>(values: (T | undefined)[], priority: Record<string, number>): T | undefined {
+function pickTop<T extends string>(
+  values: (T | undefined)[],
+  priority: Record<string, number>,
+): T | undefined {
   let best: T | undefined;
   for (const v of values) {
     if (v === undefined || !(v in priority)) continue;
@@ -65,7 +87,11 @@ function validateFinding(f: unknown): string[] {
     return ["finding がオブジェクトでない"];
   }
   const rec = f as Record<string, unknown>;
-  if (!Number.isInteger(rec.agent) || (rec.agent as number) < 1 || (rec.agent as number) > 5) {
+  if (
+    !Number.isInteger(rec.agent) ||
+    (rec.agent as number) < 1 ||
+    (rec.agent as number) > 5
+  ) {
     errors.push("agent は 1..5 の整数である必要がある");
   }
   for (const key of ["path", "title", "body", "existingCode"]) {
@@ -82,7 +108,9 @@ function validateFinding(f: unknown): string[] {
   }
   const category = rec.category as string;
   if (!VALID_CATEGORIES.has(category)) {
-    errors.push(`category は ${[...VALID_CATEGORIES].join("/")} のいずれかである必要がある`);
+    errors.push(
+      `category は ${[...VALID_CATEGORIES].join("/")} のいずれかである必要がある`,
+    );
   } else if (RULE_AGENTS.has(agent) !== (category === "rule-violation")) {
     errors.push(
       RULE_AGENTS.has(agent)
@@ -92,7 +120,9 @@ function validateFinding(f: unknown): string[] {
   }
   const severity = rec.severity as string;
   if (!VALID_SEVERITIES.has(severity)) {
-    errors.push(`severity は ${[...VALID_SEVERITIES].join("/")} のいずれかである必要がある`);
+    errors.push(
+      `severity は ${[...VALID_SEVERITIES].join("/")} のいずれかである必要がある`,
+    );
   }
   return errors;
 }
@@ -214,15 +244,24 @@ function groupFindings(findings: Finding[]): Group[] {
 
   // --- グループ構造の組み立て（安定した順序で gN を採番）---
   const groups: Group[] = [];
-  const buildGroup = (members: Finding[], { resolved }: { resolved: boolean }) => {
+  const buildGroup = (
+    members: Finding[],
+    { resolved }: { resolved: boolean },
+  ) => {
     const kind = members.some((m) => m.kind === "bug") ? "bug" : "rule";
     // severity: メンバー中の最大深刻度（critical > high > medium > low）。
-    const severity = pickTop(members.map((m) => m.severity), SEVERITY_PRIORITY) as Severity | undefined;
+    const severity = pickTop(
+      members.map((m) => m.severity),
+      SEVERITY_PRIORITY,
+    ) as Severity | undefined;
     // category: kind が bug のグループはメンバーの category のうち最重要度
     // （security > bug > performance）を採用。rule のグループは rule-violation。
     const category: Category | undefined =
       kind === "bug"
-        ? (pickTop(members.map((m) => m.category), CATEGORY_PRIORITY) as Category | undefined)
+        ? (pickTop(
+            members.map((m) => m.category),
+            CATEGORY_PRIORITY,
+          ) as Category | undefined)
         : "rule-violation";
     const g: Group = {
       id: `g${groups.length + 1}`,
@@ -267,7 +306,11 @@ function groupFindings(findings: Finding[]): Group[] {
 // 戻り値: { findings, groups, stats }
 export function processFindings(
   rawInput: unknown,
-  { ctx, diffText, prev = null }: { ctx: Ctx; diffText: string; prev?: FindingsDoc | null },
+  {
+    ctx,
+    diffText,
+    prev = null,
+  }: { ctx: Ctx; diffText: string; prev?: FindingsDoc | null },
 ): FindingsDoc {
   const changedSet = new Set(ctx.changedFiles ?? []);
   const excludedSet = new Set(ctx.excludedFiles ?? []);
@@ -279,7 +322,9 @@ export function processFindings(
     // 該当 id の existingCode を差し替え、再解決対象（active かつ未解決だったもの）だけ
     // アンカー解決をやり直す。パッチに無い finding はそのまま維持する。
     if (!Array.isArray(rawInput)) {
-      throw new Error("--retry の stdin は [{id, existingCode}] の配列である必要があります");
+      throw new Error(
+        "--retry の stdin は [{id, existingCode}] の配列である必要があります",
+      );
     }
     const patchById = new Map<string, unknown>();
     for (const p of rawInput as { id?: unknown; existingCode?: unknown }[]) {
@@ -300,9 +345,13 @@ export function processFindings(
     });
   } else {
     // 初回: 配列の配列を自動フラット化してから処理する。
-    const flat = Array.isArray(rawInput) ? (rawInput as unknown[]).flat() : null;
+    const flat = Array.isArray(rawInput)
+      ? (rawInput as unknown[]).flat()
+      : null;
     if (!Array.isArray(flat)) {
-      throw new Error("stdin は finding 配列（または配列の配列）である必要があります");
+      throw new Error(
+        "stdin は finding 配列（または配列の配列）である必要があります",
+      );
     }
     findings = flat.map((raw, i) => {
       const id = `f${i + 1}`;
@@ -351,8 +400,10 @@ export function processFindings(
     valid: findings.filter((f) => f.status === "active").length,
     invalid: findings.filter((f) => f.status === "invalid").length,
     outOfScope: findings.filter((f) => f.status === "out-of-scope").length,
-    resolved: findings.filter((f) => f.status === "active" && f.resolved).length,
-    unresolved: findings.filter((f) => f.status === "active" && !f.resolved).length,
+    resolved: findings.filter((f) => f.status === "active" && f.resolved)
+      .length,
+    unresolved: findings.filter((f) => f.status === "active" && !f.resolved)
+      .length,
     groups: groups.length,
     multiGroups: groups.filter((g) => g.needsMergeText).length,
   };

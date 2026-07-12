@@ -8,8 +8,9 @@
 // 設計原則: LLM は意味判断のみ、パース・検証・リトライ制御はコード側（docs/plans/00-overview.md）。
 // 構造化出力は outputFormat: json_schema を第一選択とし、使えない/schema 未指定のときは
 // system prompt での JSON 強制 + パースにフォールバックする（docs/plans/03-auth-smoke-test.md）。
-import { query } from "@anthropic-ai/claude-agent-sdk";
+
 import type { NonNullableUsage } from "@anthropic-ai/claude-agent-sdk";
+import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { JSONSchema } from "../lib/types.ts";
 
 export interface RunStructuredOpts {
