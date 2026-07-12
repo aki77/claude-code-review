@@ -66,12 +66,12 @@ describe("llmSummaryAndClusters", () => {
 });
 
 describe("llmReviewAgents", () => {
-  it("tier=tiny で agent3 非起動、assignments[1] 空で agent2 非起動、REVIEW.md 無しで agent5 スキップ", async () => {
+  it("tier=small でも agent3 起動、assignments[1] 空で agent2 非起動、REVIEW.md 無しで agent5 スキップ", async () => {
     const calls: unknown[] = [];
     const query = makeFakeQuery({ findings: [] }, { calls });
 
     const ctx = baseCtx({
-      tier: "tiny",
+      tier: "small",
       assignments: [{ files: [{ path: "a.ts", rules: [] }] }, { files: [] }],
     });
     await llmReviewAgents(
@@ -91,8 +91,8 @@ describe("llmReviewAgents", () => {
       },
       { query, readFile: () => null },
     );
-    // agent1（起動）+ agent4×1クラスタ（起動）= 2回。agent2/agent3/agent5 は非起動。
-    expect(calls.length).toBe(2);
+    // agent1 + agent3（tier によらず常に起動）+ agent4×1クラスタ = 3回。agent2/agent5 は非起動。
+    expect(calls.length).toBe(3);
   });
 
   it("assignments[1] が非空なら agent2 が起動する", async () => {
@@ -161,7 +161,7 @@ describe("llmReviewAgents", () => {
     const calls: unknown[] = [];
     const query = makeFakeQuery({ findings: [] }, { calls });
     const ctx = baseCtx({
-      tier: "tiny",
+      tier: "small",
       assignments: [{ files: [] }, { files: [] }],
     });
     await llmReviewAgents(
@@ -181,8 +181,8 @@ describe("llmReviewAgents", () => {
       },
       { query, readFile: (p) => (p === "REVIEW.md" ? "REVIEW 本文" : null) },
     );
-    // agent4×1クラスタ + agent5 = 2回（agent1/2/3 は非起動）。
-    expect(calls.length).toBe(2);
+    // agent3（tier によらず常に起動）+ agent4×1クラスタ + agent5 = 3回（agent1/2 は非起動）。
+    expect(calls.length).toBe(3);
   });
 
   it("agent の finding に正しい agent 番号を機械注入する", async () => {
@@ -200,21 +200,23 @@ describe("llmReviewAgents", () => {
       ],
     });
     const ctx = baseCtx({
-      tier: "tiny",
-      assignments: [{ files: [{ path: "a.ts", rules: [] }] }, { files: [] }],
+      tier: "small",
+      assignments: [{ files: [] }, { files: [] }],
     });
     const findings = await llmReviewAgents(
       { ctx, diffText: "diff", clusters: [], summary: null },
       { query, readFile: () => null },
     );
+    // agent1/2 は assignments 空で非起動、clusters 空で agent4 も非起動。
+    // agent3（tier によらず常に起動）だけが findings を返す。
     expect(findings).toHaveLength(1);
-    expect((findings[0] as { agent: number }).agent).toBe(1);
+    expect((findings[0] as { agent: number }).agent).toBe(3);
   });
 
   it("runAgentSafe: フェイク query が throw すると空配列にフォールバックする", async () => {
     const query = makeThrowingQuery();
     const ctx = baseCtx({
-      tier: "tiny",
+      tier: "small",
       assignments: [{ files: [{ path: "a.ts", rules: [] }] }, { files: [] }],
     });
     const findings = await llmReviewAgents(

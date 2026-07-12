@@ -36,7 +36,7 @@ export const SUMMARY_CLUSTERS_SCHEMA: JSONSchema = {
   required: ["summary", "clusters"],
 };
 
-// summary のみを求めるとき（tiny かつ clusters 不要）用の縮小スキーマ。
+// summary のみを求めるとき（small かつ clusters 不要）用の縮小スキーマ。
 export const SUMMARY_ONLY_SCHEMA: JSONSchema = {
   type: "object",
   properties: {

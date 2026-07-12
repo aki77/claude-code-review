@@ -129,7 +129,7 @@ export async function llmSummaryAndClusters(
   authorInfo: string,
   deps: StepDeps = {},
 ): Promise<SummaryAndClustersResult> {
-  const wantClusters = ctx.tier !== "tiny";
+  const wantClusters = ctx.tier === "normal";
   const queryFn = deps.query;
 
   const fallback: SummaryAndClustersResult = {
@@ -216,7 +216,7 @@ export async function llmReviewAgents(
   const tasks: Promise<unknown[]>[] = [];
 
   // agent1/2: プロジェクトルール準拠チェック。assignments[0]/[1] それぞれ担当ファイルが
-  // 空でないときだけ起動する（tiny/small は buildAssignments が buckets[1] を空にするので
+  // 空でないときだけ起動する（small は buildAssignments が buckets[1] を空にするので
   // agent2 は追加の tier 判定なしで自動的に非起動）。
   const ruleAssignments: { agent: number; assignment: Assignment }[] = [
     { agent: 1, assignment: ctx.assignments[0] },
@@ -245,24 +245,22 @@ export async function llmReviewAgents(
     );
   }
 
-  // agent3: バグ検出（diff 限定）。tier !== "tiny" のときのみ起動。
-  if (ctx.tier !== "tiny") {
-    tasks.push(
-      runAgentSafe(
-        "agent3",
-        () =>
-          runFindingsAgent(
-            bugAgentSystem(),
-            bugAgentUser({ summary, diffText }),
-            MODEL_HEAVY,
-            queryFn,
-          ),
-        [],
-        debug,
-        costSink,
-      ).then((findings) => stampAgent(findings, 3)),
-    );
-  }
+  // agent3: バグ検出（diff 限定）。tier によらず常に起動。
+  tasks.push(
+    runAgentSafe(
+      "agent3",
+      () =>
+        runFindingsAgent(
+          bugAgentSystem(),
+          bugAgentUser({ summary, diffText }),
+          MODEL_HEAVY,
+          queryFn,
+        ),
+      [],
+      debug,
+      costSink,
+    ).then((findings) => stampAgent(findings, 3)),
+  );
 
   // agent4: バグ検出／クロスファイル整合性チェック。各クラスタ1インスタンス並列。
   // contextHints の存在するファイル本文のみ埋め込む。

@@ -31,8 +31,8 @@
 - `llmReviewAgents({ ctx, assignments, diff, clusters, summary })` → step3:
   - 観点（agent 1〜5）ごとに `runStructured` を **`Promise.all` で並列**起動。
   - agent4 はクラスタごとに複数インスタンスを並列。
-  - tier による縮退: tiny は agent3 を起動しない・単一クラスタ、small は単一クラスタ（`review-core.md:36,52-54,88`）。
-  - **local-review 特有**: 全 agent が step2 の summary 完了を待つ（summary が唯一の著者意図情報。tiny でも summary は起動、clusters は `[]`）。
+  - tier による縮退: small は単一クラスタ（`review-core.md:36,52-54,88`）。agent3 は tier によらず常に起動。
+  - **local-review 特有**: 全 agent が step2 の summary 完了を待つ（summary が唯一の著者意図情報。small でも summary は起動、clusters は `[]`）。
   - finding 配列（全 agent 分をフラット結合）を返す。
 - `llmMergeTexts(groups)` → step5: `needsMergeText:true` グループのみ `Promise.all` 並列。
 - `llmVerifyIssues(issues, diff)` → step6: issue ごとに `Promise.all` 並列（bug 系は上位モデル、rule 系は軽量モデル）。confirmed/rejected を返す。

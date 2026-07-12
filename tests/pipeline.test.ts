@@ -79,6 +79,26 @@ function makeFakeQuery() {
         verdict: "confirmed",
         reason: "x は実際に未定義であることを確認した",
       };
+    } else if (system.includes("PR レビューコメントの文章")) {
+      // commentBodiesSystem() は「複数の指摘が統合された課題には付けないこと」という
+      // 文言を含み system.includes("統合") にも一致するため、この分岐を統合判定より先に置く。
+      const idMatch = params.prompt.match(/id: (\S+)/);
+      structuredOutput = {
+        summaryBody: "サマリ本文",
+        comments: idMatch
+          ? [{ id: idMatch[1], commentBody: "コメント本文" }]
+          : [],
+      };
+    } else if (system.includes("統合")) {
+      // mergeTextSystem() は「引用元リンク（ルール系の指摘なら...）」という文言を含み
+      // system.includes("ルール") にも一致してしまうため、この分岐をルール判定より先に置く。
+      // agent3/agent4 が同一バグを重複検出し1グループに統合されるケース
+      // （small でも agent3 が起動するようになった副作用）があるため、統合後も
+      // 元の指摘内容を保つタイトル/本文を返す。
+      structuredOutput = {
+        title: "未定義変数 x への参照",
+        body: "x が定義されていないため実行時エラーになる",
+      };
     } else if (system.includes("バグ検出")) {
       structuredOutput = {
         findings: [
@@ -97,16 +117,6 @@ function makeFakeQuery() {
       structuredOutput = { findings: [] };
     } else if (system.includes("REVIEW.md")) {
       structuredOutput = { findings: [] };
-    } else if (system.includes("PR レビューコメントの文章")) {
-      const idMatch = params.prompt.match(/id: (\S+)/);
-      structuredOutput = {
-        summaryBody: "サマリ本文",
-        comments: idMatch
-          ? [{ id: idMatch[1], commentBody: "コメント本文" }]
-          : [],
-      };
-    } else if (system.includes("統合")) {
-      structuredOutput = { title: "統合タイトル", body: "統合本文" };
     } else {
       structuredOutput = {};
     }
@@ -143,7 +153,7 @@ function makeFakeQuery() {
 }
 
 describe("runLocalReview", () => {
-  it("staged・tiny・明白なバグ1件 → final.confirmed に1件", async () => {
+  it("staged・small・明白なバグ1件 → final.confirmed に1件", async () => {
     const exec = makeFakeExec();
     const query = makeFakeQuery();
     const readFile = () => null; // CLAUDE.md/REVIEW.md/rules 本文なし（agent5 は非起動）。
@@ -155,7 +165,7 @@ describe("runLocalReview", () => {
     );
 
     expect(ctx.source).toBe("staged");
-    expect(ctx.tier).toBe("tiny");
+    expect(ctx.tier).toBe("small");
     expect(final.stats.confirmed).toBe(1);
     expect(final.issues[0]?.title).toContain("未定義変数");
   });
@@ -254,7 +264,7 @@ describe("runPrReview", () => {
     expect(result.final.stats.confirmed).toBe(1);
   });
 
-  it("tiny-PR は summary の LLM 呼び出しが発生しない", async () => {
+  it("small-PR は summary の LLM 呼び出しが発生しない", async () => {
     const systemPrompts: string[] = [];
     const innerQuery = makeFakeQuery();
     const query = ((params: {
@@ -272,7 +282,7 @@ describe("runPrReview", () => {
       { exec: exec as never, query, readFile },
     );
 
-    expect(result.ctx.tier).toBe("tiny");
+    expect(result.ctx.tier).toBe("small");
     expect(
       systemPrompts.some((s) => s.includes("サマリ") || s.includes("要約")),
     ).toBe(false);

@@ -196,7 +196,7 @@ export interface FinalDoc {
 
 // ---- collect-context 関連 ---------------------------------------------------
 
-export type Tier = "tiny" | "small" | "normal";
+export type Tier = "small" | "normal";
 export type ContextSource = "pr" | "range" | "staged";
 
 export interface Metrics {

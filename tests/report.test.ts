@@ -129,7 +129,7 @@ describe("formatSummary", () => {
     const ctx = baseCtx({
       excludedFiles: ["dist/bundle.js"],
       oversizedFiles: ["big.ts"],
-      tier: "tiny",
+      tier: "small",
       metrics: {
         totalFiles: 1,
         totalAdded: 10,
@@ -143,7 +143,7 @@ describe("formatSummary", () => {
     expect(out).toContain("レビュー対象外（大規模変更）: 1 ファイル");
     expect(out).toContain("big.ts");
     expect(out).toContain(
-      "変更規模: tiny（1 ファイル / 10 行）— 一部のレビューエージェントを省略しました",
+      "変更規模: small（1 ファイル / 10 行）— 一部のレビューエージェントを省略しました",
     );
   });
 

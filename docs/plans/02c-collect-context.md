@@ -42,8 +42,8 @@ NUL 区切り文字列を stdin 供給する必要があるが、02a 時点の `
   バイナリ（added/deleted が `-`→null）は集計・perFile から除外。失敗時は tier を落とさず全 0/空 Map。
 - `splitOversized(keptFiles, perFile, maxLines)`: `added+deleted > maxLines`（**strictly greater**）
   で oversized 分離。perFile に無い kept は残す（安全側）。oversizedFiles は sort 済み。
-- `classifyTier(totalFiles, totalChangedLines)`: tiny は `files<=maxFiles && lines<maxLines`
-  （ファイル数 `<=`・行数 `<`）、small も同型。どちらか超過で上位 tier。metrics は oversized 減算後で確定。
+- `classifyTier(totalFiles, totalChangedLines)`: small は `files<=maxFiles && lines<maxLines`
+  （ファイル数 `<=`・行数 `<`）。どちらか超過で normal。metrics は oversized 減算後で確定。
 - `claudeMdForFile(file)`: ルート＋親ディレクトリ遡上の CLAUDE.md 収集、`claudeMdCache` で
   ディレクトリ単位メモ化、sort＋unique。`.claude/rules/**/*.md` の frontmatter `paths:`
   （`parseFrontmatterPaths`、ブロック/インライン両対応）→ `path.matchesGlob` で適用算出。
@@ -51,8 +51,7 @@ NUL 区切り文字列を stdin 供給する必要があるが、02a 時点の `
   2 バケット `[{files},{files}]`: 同一ルールセットでグループ化 → 重複ゼロ・ファイル数平準化。
   tier≠normal は buckets[0] 集約（2 体目抑止）。骨格グループ LPT＋filler 配置。`resolveRules` 注入可。
 - env しきい値上書き（`num()` で Number.isFinite チェック）:
-  `CODE_REVIEW_TINY_MAX_FILES`(2)/`_TINY_MAX_LINES`(50)/`_SMALL_MAX_FILES`(5)/
-  `_SMALL_MAX_LINES`(150)/`_OVERSIZED_MAX_LINES`(1000)。
+  `CODE_REVIEW_SMALL_MAX_FILES`(5)/`_SMALL_MAX_LINES`(150)/`_OVERSIZED_MAX_LINES`(1000)。
 - その他内部: parseArgs, resolveRange（4 段自動解決。各段は `code===0 && stdout.trim()` で
   確定、それ以外は次段へフォールスルー。全段失敗時は `process.exit` ではなく `throw`
   ＝ライブラリ関数化）, getChangedFilesFromRange, getStagedFiles,

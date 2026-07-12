@@ -22,7 +22,7 @@ function singleCluster(changedFiles: string[]): Cluster[] {
   ];
 }
 
-// tier（tiny/small）による決定論的な単一クラスタ縮退の結果を作る純粋関数。
+// tier（small）による決定論的な単一クラスタ縮退の結果を作る純粋関数。
 // エージェント2の出力内容によらず縮退させるため clusters のパース前に使う。
 // fallback（rawClusters が壊れていた縮退）とは区別し tierReduced:true で理由を残す。
 export function tierReducedClusters(changedFiles: string[]): ClustersDoc {

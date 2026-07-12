@@ -87,7 +87,7 @@ describe("buildAssignments", () => {
     return rules;
   };
   const build = (files: string[]) => buildAssignments(files, [], fakeResolve);
-  const buildTier = (files: string[], tier: "tiny" | "small" | "normal") =>
+  const buildTier = (files: string[], tier: "small" | "normal") =>
     buildAssignments(files, [], fakeResolve, tier);
   const fileCounts = (assignments: ReturnType<typeof build>) =>
     assignments.map((a) => a.files.length);
@@ -142,8 +142,8 @@ describe("buildAssignments", () => {
     );
   });
 
-  it("tiny は全ファイルを buckets[0] に寄せて buckets[1] を空にする", () => {
-    const a = buildTier(["a.txt", "b.txt", "c.txt", "d.txt"], "tiny");
+  it("small は全ファイルを buckets[0] に寄せて buckets[1] を空にする", () => {
+    const a = buildTier(["a.txt", "b.txt", "c.txt", "d.txt"], "small");
     expect(fileCounts(a)).toEqual([4, 0]);
   });
 
@@ -161,18 +161,10 @@ describe("buildAssignments", () => {
 });
 
 describe("classifyTier", () => {
-  it("tiny はファイル数 AND 行数の両方がしきい値未満", () => {
-    expect(classifyTier(2, 33)).toBe("tiny"); // PR #813 相当（2ファイル33行）
-    expect(classifyTier(1, 49)).toBe("tiny");
-    expect(classifyTier(2, 49)).toBe("tiny");
-  });
-
-  it("一方でも超えたら tiny に該当しない", () => {
-    expect(classifyTier(3, 33)).toBe("small"); // ファイル数超過
-    expect(classifyTier(2, 50)).toBe("small"); // 行数超過（境界は < なので 50 は tiny 外）
-  });
-
   it("small はファイル数 AND 行数の両方がしきい値未満", () => {
+    expect(classifyTier(2, 33)).toBe("small"); // PR #813 相当（2ファイル33行）
+    expect(classifyTier(1, 49)).toBe("small");
+    expect(classifyTier(2, 49)).toBe("small");
     expect(classifyTier(5, 149)).toBe("small");
     expect(classifyTier(3, 100)).toBe("small");
   });

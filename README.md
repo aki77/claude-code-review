@@ -63,13 +63,11 @@ pnpm dev -- pr <number> [--comment] [--debug]
 
 | 環境変数 | 既定値 | 説明 |
 | --- | --- | --- |
-| `CODE_REVIEW_TINY_MAX_FILES` | 2 | tier=tiny と判定する最大ファイル数 |
-| `CODE_REVIEW_TINY_MAX_LINES` | 50 | tier=tiny と判定する最大変更行数 |
 | `CODE_REVIEW_SMALL_MAX_FILES` | 5 | tier=small と判定する最大ファイル数 |
 | `CODE_REVIEW_SMALL_MAX_LINES` | 150 | tier=small と判定する最大変更行数 |
 | `CODE_REVIEW_OVERSIZED_MAX_LINES` | 1000 | 1ファイルの変更行数がこれを超えるとレビュー対象から除外（oversizedFiles） |
 
-tier に応じて起動する LLM エージェントの数が変わる（tiny/small ほど少ない）。詳細は
+tier に応じて起動する LLM エージェントの数が変わる（small ほど少ない）。詳細は
 `docs/plans/00-overview.md` を参照。
 
 ## 既存プラグインとの差分
@@ -79,7 +77,7 @@ tier に応じて起動する LLM エージェントの数が変わる（tiny/sm
   TypeScript の純関数が担う。LLM には「意味判断」（バグかどうか、文章をどう書くか）のみを
   任せる。
 - **コスト削減**: オーケストレーション相当の LLM ターンが無くなった分、同一 diff に対する
-  トークン消費・LLM 呼び出し回数が既存プラグイン（SKILL 経由）より少ない。tier=tiny では
+  トークン消費・LLM 呼び出し回数が既存プラグイン（SKILL 経由）より少ない。tier=small では
   さらにサマリ生成用の LLM 呼び出しも省略する。
 - **データ構造互換**: Finding/Group/Issue などのデータ契約は既存 `.mjs` 実装のフィールド名を
   そのまま踏襲しており、挙動の回帰を避けている。

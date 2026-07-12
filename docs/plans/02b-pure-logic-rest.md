@@ -25,7 +25,7 @@
   - 未カバー追加（covered でない changedFiles を appendedPaths 記録し**最小クラスタ**へ push）。
   - id 1 始まり振り直し＋`{id,theme,changedFiles,symbols,contextHints}` 整列。
 - `tierReducedClusters(changedFiles)` → 単一クラスタ・`fallback:false`・**`tierReduced:true`**
-  （tier tiny/small 用。壊れ入力の fallback と区別）。
+  （tier small 用。壊れ入力の fallback と区別）。
 - 型: `Cluster`, `ClustersDoc`。
 
 ### 2. `src/lib/merge-findings.ts` ← `scripts/merge-findings.mjs`

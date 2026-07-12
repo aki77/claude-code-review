@@ -27,7 +27,7 @@
   step2 待ち」を求めるが、既存 `llmReviewAgents` は step2 完了後に全 agent を `Promise.all` で
   起動する構造で、最終結果は同一・agent4 はどのみち clusters を待つ。テスト済み関数をフォーク
   するコストに見合わないため意図的にスキップした。
-- tiny-PR は summary 呼び出しを省き PR タイトル/説明を summary に流す: tier=tiny の PR では
+- small-PR は summary 呼び出しを省き PR タイトル/説明を summary に流す: tier=small の PR では
   サマリ LLM 呼び出しをスキップし（`runReviewCore` の `skipSummaryAgent`）、`formatPrAuthorInfo`
   が組んだ PR タイトル/説明文をそのまま `summary` としてレビュー agent に渡す。LLM 1回分の
   コスト削減。

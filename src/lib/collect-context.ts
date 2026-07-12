@@ -61,22 +61,14 @@ function num(v: string | undefined, fallback: number): number {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
 }
-const TIER_THRESHOLDS = {
-  tiny: {
-    maxFiles: num(process.env.CODE_REVIEW_TINY_MAX_FILES, 2),
-    maxLines: num(process.env.CODE_REVIEW_TINY_MAX_LINES, 50),
-  },
-  small: {
-    maxFiles: num(process.env.CODE_REVIEW_SMALL_MAX_FILES, 5),
-    maxLines: num(process.env.CODE_REVIEW_SMALL_MAX_LINES, 150),
-  },
-};
+const SMALL_MAX_FILES = num(process.env.CODE_REVIEW_SMALL_MAX_FILES, 5);
+const SMALL_MAX_LINES = num(process.env.CODE_REVIEW_SMALL_MAX_LINES, 150);
 
 // 1ファイルの変更行数（追加+削除）がこれを「超えたら」レビュー対象から外し oversizedFiles に
 // 分離する（generated/バイナリの excludedFiles とは別枠。こちらは「大規模ゆえに個別レビューが
 // 困難」）。本プラグインはトークン実測機構を持たないため行数で近似する。デフォルト 1000 は
 // 複数ファイルを1エージェントに渡す本構成で単一ファイルがコンテキストを占有しすぎない中庸値。
-// 環境変数で調整可能。tier の行数しきい値（TIER_THRESHOLDS.small.maxLines 等）より大きい前提で、
+// 環境変数で調整可能。tier の行数しきい値（SMALL_MAX_LINES 等）より大きい前提で、
 // これを下げて tier しきい値を下回らせると「単一ファイルが tier しきい値を跨ぐ前に oversized 落ち」
 // して tier の意味が変わるので注意（両しきい値とも「変更規模の分類」という同じ概念系に属する）。
 const OVERSIZED_MAX_LINES = num(
@@ -85,17 +77,13 @@ const OVERSIZED_MAX_LINES = num(
 );
 
 // 変更規模から tier を決める純粋関数。
-// tiny/small はいずれも「ファイル数 AND 行数」の両方がしきい値未満のときのみ該当し、
-// どちらか一方でも超えたら上位 tier（最終的に normal）へ繰り上がる。
+// small は「ファイル数 AND 行数」の両方がしきい値未満のときのみ該当し、
+// どちらか一方でも超えたら normal へ繰り上がる。
 export function classifyTier(
   totalFiles: number,
   totalChangedLines: number,
 ): Tier {
-  const { tiny, small } = TIER_THRESHOLDS;
-  if (totalFiles <= tiny.maxFiles && totalChangedLines < tiny.maxLines) {
-    return "tiny";
-  }
-  if (totalFiles <= small.maxFiles && totalChangedLines < small.maxLines) {
+  if (totalFiles <= SMALL_MAX_FILES && totalChangedLines < SMALL_MAX_LINES) {
     return "small";
   }
   return "normal";
@@ -646,11 +634,11 @@ export function buildAssignments(
   };
 
   if (tier !== "normal") {
-    // fast-path（tiny/small）: ルール準拠チェックを1エージェントに寄せる。
+    // fast-path（small）: ルール準拠チェックを1エージェントに寄せる。
     // 全グループのファイルを bucketA に集約し bucketB を空にする
     // （→ review-core の「assignments[1].files が空ならエージェント2を起動しない」条件が
     //   自動的に成立し、プロンプト側の変更なしにエージェント2起動が抑止される）。
-    // tiny/small は総ファイル数がしきい値以内（small で最大5）なので1体が読むルール量も限定的。
+    // small は総ファイル数がしきい値以内（small で最大5）なので1体が読むルール量も限定的。
     for (const g of groups) place(bucketA, g, g.files);
   } else if (groups.length === 1) {
     // 縮退ケース: グループが1つだけなら、その単一グループを2バケットへ均等割りする
@@ -798,7 +786,7 @@ export async function collectContext(
   const tier = classifyTier(metrics.totalFiles, metrics.totalChangedLines);
 
   // tier に応じてルール準拠エージェントの割り当てを縮退させる
-  // （tiny/small は buckets[1] を空にして2体目の起動を抑止する）。
+  // （small は buckets[1] を空にして2体目の起動を抑止する）。
   const assignments = buildAssignments(changedFiles, rules, undefined, tier);
 
   // source は全モードで出力する。PR モードもローカル range に統一されたため、diffArgs /
