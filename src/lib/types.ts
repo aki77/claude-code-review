@@ -229,3 +229,37 @@ export interface Rule {
   path: string;
   paths: string[] | null;
 }
+
+// ---- post-review 関連 -------------------------------------------------------
+
+/** LLM が返す 1 コメント分の入力。 */
+export interface PostReviewComment {
+  id: string;
+  commentBody: string;
+  suggestion?: string | string[];
+  deleteLines?: string[];
+}
+
+/** LLM が返す投稿入力全体。 */
+export interface PostReviewInput {
+  summaryBody?: string;
+  comments: PostReviewComment[];
+}
+
+/** REST PR レビューコメント（buildPayload の出力要素）。 */
+export interface RestComment {
+  path: string;
+  body: string;
+  line: number;
+  side?: CommentSide;
+  start_line?: number;
+  start_side?: CommentSide;
+}
+
+/** REST POST /pulls/{n}/reviews のリクエストボディ。 */
+export interface ReviewPayload {
+  commit_id: string;
+  event: "COMMENT";
+  body: string;
+  comments: RestComment[];
+}

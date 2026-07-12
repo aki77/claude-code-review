@@ -8,9 +8,8 @@
 `post-review.ts` はそこから import する。
 
 exec.ts の前提条件: 投稿本体（`gh api ... --input -`、Phase 5）は JSON を stdin 供給する
-必要があるが、02a 時点の `exec.ts`（`execFileAsync`）は `input` オプションを持たない。
-Phase 5 着手時に `exec.ts` へ `options.input?: string` を追加すること
-（02c と同じ不足・詳細は 02a の exec.ts セクション参照）。
+必要がある。**解消済み**: `src/lib/exec.ts` の `execFileAsync` は既に `options.input?: string`
+を実装済み（stdin 供給・EPIPE 対策込み）。Phase 2d でも Phase 5 でも exec.ts への追加作業は不要。
 
 参照元: `/Users/aki/src/github.com/aki77/claude-plugins/plugins/code-review/scripts/post-review.mjs`
 
