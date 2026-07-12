@@ -11,7 +11,10 @@
 // system prompt は claude_code プリセットを土台にし、JSON 強制指示を含むレビュー本文は
 // append で末尾に載せる（docs/plans/*-system-prompt-*.md）。
 
-import type { NonNullableUsage } from "@anthropic-ai/claude-agent-sdk";
+import type {
+  ModelUsage,
+  NonNullableUsage,
+} from "@anthropic-ai/claude-agent-sdk";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { JSONSchema } from "../lib/types.ts";
 
@@ -26,6 +29,7 @@ export interface RunStructuredResult<T> {
   data: T;
   usage: NonNullableUsage;
   totalCostUsd: number;
+  modelUsage: Record<string, ModelUsage>;
 }
 
 // query の型（型引数なしで typeof query を直接使うと呼び出しシグネチャが煩雑になるため別名化）。
@@ -88,12 +92,18 @@ export async function runStructured<T>(
       data: result.structured_output as T,
       usage: result.usage,
       totalCostUsd: result.total_cost_usd,
+      modelUsage: result.modelUsage,
     };
   }
 
   try {
     const data = JSON.parse(result.result) as T;
-    return { data, usage: result.usage, totalCostUsd: result.total_cost_usd };
+    return {
+      data,
+      usage: result.usage,
+      totalCostUsd: result.total_cost_usd,
+      modelUsage: result.modelUsage,
+    };
   } catch {
     // パース失敗時は 1 回だけリトライ。structured_output 経路はここに来ないためリトライ対象外。
     const retryResult = await runQueryUntilResult(
@@ -106,6 +116,7 @@ export async function runStructured<T>(
       data,
       usage: retryResult.usage,
       totalCostUsd: retryResult.total_cost_usd,
+      modelUsage: retryResult.modelUsage,
     };
   }
 }

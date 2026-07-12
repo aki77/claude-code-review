@@ -5,6 +5,7 @@
 //   clusters 確定（validateClusters / tierReducedClusters）→ llmReviewAgents →
 //   processFindings → [step4b スキップ] → llmMergeTexts → mergeFindings →
 //   llmVerifyIssues → applyVerdicts → (pr-review のみ) llmCommentBodies → postReview
+import type { ModelUsage } from "@anthropic-ai/claude-agent-sdk";
 import { applyVerdicts } from "./lib/apply-verdicts.ts";
 import {
   type CollectContextOpts,
@@ -28,6 +29,7 @@ import {
 } from "./lib/validate-clusters.ts";
 import type { QueryFn } from "./llm/client.ts";
 import {
+  type CostSink,
   type DebugSink,
   defaultReadFile,
   llmCommentBodies,
@@ -74,6 +76,33 @@ async function runReviewCore(
 ): Promise<FinalDoc> {
   const { exec, query, readFile, debug } = deps;
 
+  // 実行全体のコスト集計。モデルIDごとに ModelUsage を加算し、debug("cost-summary", ...) で
+  // final の直後に出力する（SDK の result.modelUsage をそのまま集計するため、モデル混在時も
+  // 正確な内訳になる）。
+  // 加算対象は実測値のみ（contextWindow/maxOutputTokens はモデル固有のスペック値であり
+  // 加算しない。ModelUsage にフィールドが増えても手作業の追随が要らないようループで加算する）。
+  const ACCUMULATED_USAGE_FIELDS = [
+    "inputTokens",
+    "outputTokens",
+    "cacheReadInputTokens",
+    "cacheCreationInputTokens",
+    "webSearchRequests",
+    "costUSD",
+  ] as const satisfies readonly (keyof ModelUsage)[];
+  const costs: Record<string, ModelUsage> = {};
+  const costSink: CostSink = (modelUsage) => {
+    for (const [model, usage] of Object.entries(modelUsage)) {
+      const acc = costs[model];
+      if (acc === undefined) {
+        costs[model] = { ...usage };
+      } else {
+        for (const field of ACCUMULATED_USAGE_FIELDS) {
+          acc[field] += usage[field];
+        }
+      }
+    }
+  };
+
   // diff 取得（統一 diff。以降の全ステップがこの diff を使う）。
   const diffResult = await exec("git", buildDiffArgs(ctx), {
     maxBuffer: DIFF_MAX_BUFFER,
@@ -88,6 +117,7 @@ async function runReviewCore(
       stats: { total: 0, confirmed: 0, rejected: 0, unverified: 0 },
     };
     debug("final", emptyFinal);
+    debug("cost-summary", { totalCostUsd: 0, byModel: {} });
     return emptyFinal;
   }
 
@@ -102,6 +132,7 @@ async function runReviewCore(
     const result = await llmSummaryAndClusters(ctx, diffText, authorInfo, {
       query,
       debug,
+      costSink,
     });
     summary = result.summary;
     rawClusters = result.rawClusters;
@@ -118,7 +149,7 @@ async function runReviewCore(
   // レビューエージェント（agent1〜5）。
   const rawFindings = await llmReviewAgents(
     { ctx, diffText, clusters: clustersDoc.clusters, summary },
-    { query, readFile, debug },
+    { query, readFile, debug, costSink },
   );
 
   // finding 機械処理。
@@ -134,7 +165,11 @@ async function runReviewCore(
   }
 
   // 統合文章作成。
-  const mergeTexts = await llmMergeTexts(findingsDoc, { query, debug });
+  const mergeTexts = await llmMergeTexts(findingsDoc, {
+    query,
+    debug,
+    costSink,
+  });
   debug("mergeTexts", mergeTexts);
 
   // ISSUES 生成。
@@ -145,12 +180,17 @@ async function runReviewCore(
   const verdicts = await llmVerifyIssues(issuesDoc.issues, diffText, summary, {
     query,
     debug,
+    costSink,
   });
   debug("verdicts", verdicts);
 
   // FINAL 生成。
   const final = applyVerdicts(issuesDoc, verdicts);
   debug("final", final);
+  debug("cost-summary", {
+    totalCostUsd: Object.values(costs).reduce((sum, m) => sum + m.costUSD, 0),
+    byModel: costs,
+  });
 
   return final;
 }

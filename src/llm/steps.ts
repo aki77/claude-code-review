@@ -5,6 +5,7 @@
 // 設計原則（docs/plans/04-llm-steps.md）: LLM は意味判断のみ。位置解決・検証・フィルタ適用・
 // 構造転写・グルーピング・並列制御はすべてコードで決定論的に行う（Promise.all で並列化）。
 import { readFileSync } from "node:fs";
+import type { ModelUsage } from "@anthropic-ai/claude-agent-sdk";
 import type {
   Assignment,
   Cluster,
@@ -18,7 +19,11 @@ import type {
   Verdict,
 } from "../lib/types.ts";
 import { formatBadge } from "../report.ts";
-import { type QueryFn, runStructured } from "./client.ts";
+import {
+  type QueryFn,
+  type RunStructuredResult,
+  runStructured,
+} from "./client.ts";
 import {
   bugAgentSystem,
   bugAgentUser,
@@ -48,10 +53,15 @@ import {
 
 export type DebugSink = (label: string, obj: unknown) => void;
 
+// 実行全体のコスト集計器。runAgentSafe の成功パスで modelUsage を受け取り、
+// 呼び出し側（pipeline.ts）がモデルごとに加算する。
+export type CostSink = (modelUsage: Record<string, ModelUsage>) => void;
+
 export interface StepDeps {
   query?: QueryFn;
   readFile?: (relPath: string) => string | null;
   debug?: DebugSink;
+  costSink?: CostSink;
 }
 
 // デフォルトの readFile: fs.readFileSync、例外→null。
@@ -69,9 +79,10 @@ export function defaultReadFile(relPath: string): string | null {
 // 「空扱い」を1箇所に集約する。
 async function runAgentSafe<T>(
   label: string,
-  fn: () => Promise<{ data: T; usage: unknown; totalCostUsd: number }>,
+  fn: () => Promise<RunStructuredResult<T>>,
   fallback: T,
   debug?: DebugSink,
+  costSink?: CostSink,
 ): Promise<T> {
   try {
     const result = await fn();
@@ -79,6 +90,7 @@ async function runAgentSafe<T>(
       usage: result.usage,
       totalCostUsd: result.totalCostUsd,
     });
+    costSink?.(result.modelUsage);
     return result.data;
   } catch (error) {
     debug?.(`agent:${label}:failed`, {
@@ -96,16 +108,12 @@ async function runFindingsAgent(
   user: string,
   model: string,
   queryFn: QueryFn | undefined,
-): Promise<{ data: unknown[]; usage: unknown; totalCostUsd: number }> {
+): Promise<RunStructuredResult<unknown[]>> {
   const result = await runStructured<{ findings: unknown[] }>(
     { system, user, model, schema: FINDINGS_SCHEMA },
     { query: queryFn },
   );
-  return {
-    data: result.data.findings,
-    usage: result.usage,
-    totalCostUsd: result.totalCostUsd,
-  };
+  return { ...result, data: result.data.findings };
 }
 
 // ---- step2: サマリ + 影響クラスタ分割 ----------------------------------------
@@ -144,16 +152,16 @@ export async function llmSummaryAndClusters(
         { query: queryFn },
       );
       return {
+        ...result,
         data: {
           summary: result.data.summary,
           rawClusters: wantClusters ? (result.data.clusters ?? []) : [],
         },
-        usage: result.usage,
-        totalCostUsd: result.totalCostUsd,
       };
     },
     fallback,
     deps.debug,
+    deps.costSink,
   );
 }
 
@@ -203,6 +211,7 @@ export async function llmReviewAgents(
   const queryFn = deps.query;
   const readFile = deps.readFile ?? defaultReadFile;
   const debug = deps.debug;
+  const costSink = deps.costSink;
 
   const tasks: Promise<unknown[]>[] = [];
 
@@ -231,6 +240,7 @@ export async function llmReviewAgents(
         },
         [],
         debug,
+        costSink,
       ).then((findings) => stampAgent(findings, agent)),
     );
   }
@@ -249,6 +259,7 @@ export async function llmReviewAgents(
           ),
         [],
         debug,
+        costSink,
       ).then((findings) => stampAgent(findings, 3)),
     );
   }
@@ -279,6 +290,7 @@ export async function llmReviewAgents(
         },
         [],
         debug,
+        costSink,
       ).then((findings) => stampAgent(findings, 4)),
     );
   }
@@ -298,6 +310,7 @@ export async function llmReviewAgents(
           ),
         [],
         debug,
+        costSink,
       ).then((findings) => stampAgent(findings, 5)),
     );
   }
@@ -325,6 +338,7 @@ export async function llmMergeTexts(
 ): Promise<MergeText[]> {
   const queryFn = deps.query;
   const debug = deps.debug;
+  const costSink = deps.costSink;
   const targets = findingsDoc.groups.filter((g) => g.needsMergeText);
   if (targets.length === 0) return [];
 
@@ -352,14 +366,11 @@ export async function llmMergeTexts(
             },
             { query: queryFn },
           );
-          return {
-            data: result.data,
-            usage: result.usage,
-            totalCostUsd: result.totalCostUsd,
-          };
+          return result;
         },
         fallback,
         debug,
+        costSink,
       );
       return {
         groupId: group.id,
@@ -383,6 +394,7 @@ export async function llmVerifyIssues(
 ): Promise<Verdict[]> {
   const queryFn = deps.query;
   const debug = deps.debug;
+  const costSink = deps.costSink;
 
   const results = await Promise.all(
     issues.map(async (issue) => {
@@ -407,14 +419,11 @@ export async function llmVerifyIssues(
             },
             { query: queryFn },
           );
-          return {
-            data: result.data,
-            usage: result.usage,
-            totalCostUsd: result.totalCostUsd,
-          };
+          return result;
         },
         null,
         debug,
+        costSink,
       );
       return verdict === null
         ? null
@@ -485,6 +494,7 @@ export async function llmCommentBodies(
 ): Promise<PostReviewInput> {
   const queryFn = deps.query;
   const debug = deps.debug;
+  const costSink = deps.costSink;
 
   const inlineable = final.issues.filter((i) => i.resolved);
   const deferred = final.issues.filter((i) => !i.resolved);
@@ -511,14 +521,11 @@ export async function llmCommentBodies(
         },
         { query: queryFn },
       );
-      return {
-        data: result.data,
-        usage: result.usage,
-        totalCostUsd: result.totalCostUsd,
-      };
+      return result;
     },
     { summaryBody: "", comments: [] },
     debug,
+    costSink,
   );
 
   const byId = new Map(raw.comments.map((c) => [c.id, c]));
