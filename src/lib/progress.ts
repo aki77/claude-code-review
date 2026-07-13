@@ -17,6 +17,8 @@ export interface ProgressReporter {
   succeedStep(note?: string): void;
   // パイプライン終了時の後始末（スピナー停止など）。呼び出し側の finally で必ず1回呼ぶ。
   done(): void;
+  // 実行全体の合計コスト（USD）を控えめに1行表示する。0 のときは何も出さない。
+  reportCost(totalCostUsd: number): void;
 }
 
 export const noopReporter: ProgressReporter = {
@@ -24,7 +26,17 @@ export const noopReporter: ProgressReporter = {
   tickAgent: () => {},
   succeedStep: () => {},
   done: () => {},
+  reportCost: () => {},
 };
+
+// 薄色（dim）ラベル付きのコスト行を stderr へ1行出す。TTY のときだけ ANSI エスケープで
+// 色を付け、非 TTY（パイプ/CI）ではプレーン文字列にする（色コード混入を避ける）。
+function writeCostLine(totalCostUsd: number): void {
+  if (totalCostUsd === 0) return;
+  const text = `cost: $${totalCostUsd.toFixed(4)}`;
+  const line = process.stderr.isTTY === true ? `\x1b[2m${text}\x1b[0m` : text;
+  process.stderr.write(`${line}\n`);
+}
 
 function makeSpinnerReporter(): ProgressReporter {
   let spinner: Ora | undefined;
@@ -58,6 +70,7 @@ function makeSpinnerReporter(): ProgressReporter {
     done() {
       spinner?.stop();
     },
+    reportCost: writeCostLine,
   };
 }
 
@@ -87,6 +100,7 @@ function makePlainReporter(): ProgressReporter {
       process.stderr.write(`✓ ${label}${suffix}\n`);
     },
     done() {},
+    reportCost: writeCostLine,
   };
 }
 

@@ -79,7 +79,7 @@ async function runReviewCore(
       debug: DebugSink;
       progress: ProgressReporter;
     },
-): Promise<FinalDoc> {
+): Promise<{ final: FinalDoc; totalCostUsd: number }> {
   const { exec, query, readFile, debug, progress } = deps;
 
   // 実行全体のコスト集計。モデルIDごとに ModelUsage を加算し、debug("cost-summary", ...) で
@@ -126,7 +126,7 @@ async function runReviewCore(
     };
     debug("final", emptyFinal);
     debug("cost-summary", { totalCostUsd: 0, byModel: {} });
-    return emptyFinal;
+    return { final: emptyFinal, totalCostUsd: 0 };
   }
 
   // サマリ + クラスタ分割案。small-PR は summary の LLM 呼び出しを省き、著者意図情報
@@ -218,12 +218,13 @@ async function runReviewCore(
     `confirmed:${final.stats.confirmed} rejected:${final.stats.rejected}`,
   );
   debug("final", final);
-  debug("cost-summary", {
-    totalCostUsd: Object.values(costs).reduce((sum, m) => sum + m.costUSD, 0),
-    byModel: costs,
-  });
+  const totalCostUsd = Object.values(costs).reduce(
+    (sum, m) => sum + m.costUSD,
+    0,
+  );
+  debug("cost-summary", { totalCostUsd, byModel: costs });
 
-  return final;
+  return { final, totalCostUsd };
 }
 
 function makeDebugSink(enabled: boolean): DebugSink {
@@ -250,6 +251,7 @@ export async function runLocalReview(
     debug: runOpts.debug,
   });
 
+  let totalCostUsd = 0;
   try {
     progress.startStep("コンテキスト収集");
     const ctx = await collectContext(opts, { exec });
@@ -274,17 +276,19 @@ export async function runLocalReview(
       authorInfo = `（コミットメッセージなし）${DIFF_ONLY_AUTHOR_INFO}`;
     }
 
-    const final = await runReviewCore(ctx, authorInfo, false, {
+    const result = await runReviewCore(ctx, authorInfo, false, {
       exec,
       query,
       readFile,
       debug,
       progress,
     });
+    totalCostUsd = result.totalCostUsd;
 
-    return { final, ctx };
+    return { final: result.final, ctx };
   } finally {
     progress.done();
+    progress.reportCost(totalCostUsd);
   }
 }
 
@@ -302,6 +306,7 @@ export async function runPrReview(
     debug: runOpts.debug,
   });
 
+  let totalCostUsd = 0;
   try {
     // step0: PR メタ取得（headRefOid・baseRefOid・baseRefName を含む。gh pr view の
     // 重複呼び出しを避ける。collectContext の PR モードにも baseRef として渡す）。
@@ -325,13 +330,15 @@ export async function runPrReview(
 
     const authorInfo = formatPrAuthorInfo(meta);
 
-    const final = await runReviewCore(ctx, authorInfo, ctx.tier === "small", {
+    const result = await runReviewCore(ctx, authorInfo, ctx.tier === "small", {
       exec,
       query,
       readFile,
       debug,
       progress,
     });
+    totalCostUsd = result.totalCostUsd;
+    const { final } = result;
 
     if (!runOpts.comment) {
       return { final, ctx, headRefOid: meta.headRefOid };
@@ -361,5 +368,6 @@ export async function runPrReview(
     return { final, ctx, postedUrl, headRefOid: meta.headRefOid };
   } finally {
     progress.done();
+    progress.reportCost(totalCostUsd);
   }
 }
