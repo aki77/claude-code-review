@@ -1,7 +1,6 @@
 {
-  "name": "claude-code-review",
+  "name": "@aki77/claude-code-review",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "engines": {
     "node": ">=24"
@@ -10,6 +9,21 @@
   "bin": {
     "code-review": "dist/cli.js"
   },
+  "files": [
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aki77/claude-code-review.git"
+  },
+  "homepage": "https://github.com/aki77/claude-code-review",
+  "bugs": {
+    "url": "https://github.com/aki77/claude-code-review/issues"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "node src/cli.ts",
@@ -17,7 +31,8 @@
     "test:watch": "vitest",
     "lint": "biome check .",
     "format": "biome check --write .",
-    "prepare": "git config --local core.hooksPath .githooks || echo 'Can not set git hooks'"
+    "prepare": "git config --local core.hooksPath .githooks || echo 'Can not set git hooks'",
+    "prepublishOnly": "pnpm build"
   },
   "lint-staged": {
     "*.{ts,json,jsonc}": [

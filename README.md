@@ -6,12 +6,25 @@ Claude Agent SDK を使ったコードレビュー CLI。**位置解決・検証
 
 ## インストール・前提
 
-- Node.js 24 系、pnpm。
+- Node.js 24 系。
 - [Claude Code](https://github.com/anthropics/claude-code) CLI にログイン済みであること
   （後述の認証の仕組み参照）。
 - `pr` コマンドを使う場合は [`gh` CLI](https://cli.github.com/) がインストール・認証済みで
   あること。
 - `jq` は不要（`gh` の `--jq` オプション経由で使うのみで、別プロセスとしては起動しない）。
+
+## 使い方（エンドユーザー向け: npx 実行）
+
+インストール不要で `npx` から直接実行できる。
+
+```bash
+npx @aki77/claude-code-review -- local [--range [<range>]] [--debug]
+npx @aki77/claude-code-review -- pr <number> [--comment] [--debug]
+```
+
+サブコマンドへの引数を渡すには `--` 区切りが必要。
+
+## 開発者向け: セットアップ
 
 ```bash
 pnpm install
