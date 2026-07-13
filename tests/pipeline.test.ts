@@ -177,7 +177,7 @@ describe("runLocalReview", () => {
 
     const { final, ctx } = await runLocalReview(
       { mode: "range", range: undefined },
-      { debug: false },
+      { debug: false, quiet: true },
       { exec: exec as never, query, readFile },
     );
 
@@ -196,7 +196,7 @@ describe("runLocalReview", () => {
 
     const { final } = await runLocalReview(
       { mode: "range", range: undefined },
-      { debug: false },
+      { debug: false, quiet: true },
       { exec: exec as never, query, readFile },
     );
 
@@ -290,7 +290,7 @@ describe("runPrReview", () => {
 
     const result = await runPrReview(
       "1",
-      { debug: false, comment: false },
+      { debug: false, comment: false, quiet: true },
       { exec: exec as never, query, readFile },
     );
 
@@ -313,7 +313,7 @@ describe("runPrReview", () => {
 
     const result = await runPrReview(
       "1",
-      { debug: false, comment: false },
+      { debug: false, comment: false, quiet: true },
       { exec: exec as never, query, readFile },
     );
 
@@ -335,7 +335,7 @@ describe("runPrReview", () => {
 
     const result = await runPrReview(
       "1",
-      { debug: false, comment: true },
+      { debug: false, comment: true, quiet: true },
       { exec: exec as never, query, readFile },
     );
 
@@ -359,7 +359,7 @@ describe("runPrReview", () => {
     await expect(
       runPrReview(
         "1",
-        { debug: false, comment: false },
+        { debug: false, comment: false, quiet: true },
         { exec: exec as never, query, readFile },
       ),
     ).rejects.toThrow(/一致しません/);

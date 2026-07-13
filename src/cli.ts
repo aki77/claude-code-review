@@ -16,18 +16,19 @@ import { printSummary } from "./report.ts";
 
 type Command = "local" | "pr";
 
-type ParsedArgs = {
+export type ParsedArgs = {
   command: Command;
   prNumber?: number;
   range?: string | true;
   comment: boolean;
   debug: boolean;
+  quiet: boolean;
   help: boolean;
 };
 
 const USAGE = `Usage:
-  code-review local [--range [<range>]] [--debug]
-  code-review pr <number> [--comment] [--debug]
+  code-review local [--range [<range>]] [--debug] [--quiet]
+  code-review pr <number> [--comment] [--debug] [--quiet]
   code-review --help
 
 Commands:
@@ -38,13 +39,14 @@ Options:
   --range [<range>]  local 専用。差分範囲を指定（省略時は staged を自動判別）
   --comment          pr 専用。レビュー結果を PR にインラインコメントとして投稿する
   --debug            デバッグログを出力する
+  --quiet, -q        進捗表示を抑制する
   -h, --help         このヘルプを表示する
 `;
 
-class UsageError extends Error {}
+export class UsageError extends Error {}
 
 function isFlag(token: string | undefined): boolean {
-  return token?.startsWith("--") ?? false;
+  return token?.startsWith("-") ?? false;
 }
 
 /**
@@ -52,10 +54,11 @@ function isFlag(token: string | undefined): boolean {
  * `parseFlags` (claude-plugins/.../scripts/lib/artifact.mjs:88) を踏襲しつつ、
  * サブコマンド（位置引数）と、値省略可能なフラグ（--range）を扱えるように拡張したもの。
  */
-function parseArgs(argv: string[]): ParsedArgs {
+export function parseArgs(argv: string[]): ParsedArgs {
   let help = false;
   let comment = false;
   let debug = false;
+  let quiet = false;
   let range: string | true | undefined;
   let command: Command | undefined;
   let prNumber: number | undefined;
@@ -85,6 +88,12 @@ function parseArgs(argv: string[]): ParsedArgs {
 
     if (token === "--debug") {
       debug = true;
+      i += 1;
+      continue;
+    }
+
+    if (token === "--quiet" || token === "-q") {
+      quiet = true;
       i += 1;
       continue;
     }
@@ -129,7 +138,14 @@ function parseArgs(argv: string[]): ParsedArgs {
   }
 
   if (help) {
-    return { command: command ?? "local", help, comment, debug, range };
+    return {
+      command: command ?? "local",
+      help,
+      comment,
+      debug,
+      quiet,
+      range,
+    };
   }
 
   if (command === undefined) {
@@ -140,7 +156,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     throw new UsageError("missing PR number");
   }
 
-  return { command, prNumber, range, comment, debug, help };
+  return { command, prNumber, range, comment, debug, quiet, help };
 }
 
 async function dispatch(args: ParsedArgs): Promise<number> {
@@ -156,7 +172,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
     try {
       const { final, ctx } = await runLocalReview(
         { mode: "range", range: rangeOpt },
-        { debug: args.debug },
+        { debug: args.debug, quiet: args.quiet },
       );
       printSummary(final, ctx);
       return final.stats.confirmed > 0 ? 1 : 0;
@@ -174,6 +190,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
         {
           debug: args.debug,
           comment: args.comment,
+          quiet: args.quiet,
         },
       );
       printSummary(final, ctx);
@@ -207,4 +224,9 @@ async function main(): Promise<void> {
   process.exit(await dispatch(args));
 }
 
-main();
+// CLI として直接実行されたときのみエントリポイントを起動する。
+// （`tests/cli.test.ts` から parseArgs を import する際に main() が
+// 副作用として走り process.exit してしまうのを防ぐためのガード）
+if (import.meta.main) {
+  main();
+}

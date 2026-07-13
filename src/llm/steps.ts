@@ -6,6 +6,7 @@
 // 構造転写・グルーピング・並列制御はすべてコードで決定論的に行う（Promise.all で並列化）。
 import { readFileSync } from "node:fs";
 import type { ModelUsage } from "@anthropic-ai/claude-agent-sdk";
+import type { ProgressReporter } from "../lib/progress.ts";
 import type {
   Assignment,
   Cluster,
@@ -66,6 +67,7 @@ export interface StepDeps {
   readFile?: (relPath: string) => string | null;
   debug?: DebugSink;
   costSink?: CostSink;
+  progress?: ProgressReporter;
 }
 
 // デフォルトの readFile: fs.readFileSync、例外→null。
@@ -87,6 +89,7 @@ async function runAgentSafe<T>(
   fallback: T,
   debug?: DebugSink,
   costSink?: CostSink,
+  progress?: ProgressReporter,
 ): Promise<T> {
   try {
     const result = await fn();
@@ -101,6 +104,8 @@ async function runAgentSafe<T>(
       error: error instanceof Error ? error.message : error,
     });
     return fallback;
+  } finally {
+    progress?.tickAgent();
   }
 }
 
@@ -137,6 +142,7 @@ export async function llmSummaryAndClusters(
   const wantClusters = ctx.tier === "normal";
   const queryFn = deps.query;
 
+  deps.progress?.startStep("要約", 1);
   const fallback: SummaryAndClustersResult = {
     summary: null,
     rawClusters: [] as unknown[],
@@ -167,6 +173,7 @@ export async function llmSummaryAndClusters(
     fallback,
     deps.debug,
     deps.costSink,
+    deps.progress,
   );
 }
 
@@ -217,6 +224,7 @@ export async function llmReviewAgents(
   const readFile = deps.readFile ?? defaultReadFile;
   const debug = deps.debug;
   const costSink = deps.costSink;
+  const progress = deps.progress;
 
   const tasks: Promise<unknown[]>[] = [];
 
@@ -246,6 +254,7 @@ export async function llmReviewAgents(
         [],
         debug,
         costSink,
+        progress,
       ).then((findings) => stampAgent(findings, agent)),
     );
   }
@@ -264,6 +273,7 @@ export async function llmReviewAgents(
       [],
       debug,
       costSink,
+      progress,
     ).then((findings) => stampAgent(findings, 3)),
   );
 
@@ -296,6 +306,7 @@ export async function llmReviewAgents(
         [],
         debug,
         costSink,
+        progress,
       ).then((findings) => stampAgent(findings, 4)),
     );
   }
@@ -316,10 +327,12 @@ export async function llmReviewAgents(
         [],
         debug,
         costSink,
+        progress,
       ).then((findings) => stampAgent(findings, 5)),
     );
   }
 
+  progress?.startStep("レビュー", tasks.length);
   const results = await Promise.all(tasks);
   return results.flat();
 }
@@ -344,9 +357,11 @@ export async function llmMergeTexts(
   const queryFn = deps.query;
   const debug = deps.debug;
   const costSink = deps.costSink;
+  const progress = deps.progress;
   const targets = findingsDoc.groups.filter((g) => g.needsMergeText);
   if (targets.length === 0) return [];
 
+  progress?.startStep("統合文章作成", targets.length);
   const findingById = new Map(findingsDoc.findings.map((f) => [f.id, f]));
 
   const results = await Promise.all(
@@ -376,6 +391,7 @@ export async function llmMergeTexts(
         fallback,
         debug,
         costSink,
+        progress,
       );
       return {
         groupId: group.id,
@@ -401,6 +417,7 @@ export async function retryUnresolvedAnchors(
   const queryFn = deps.query;
   const debug = deps.debug;
   const costSink = deps.costSink;
+  const progress = deps.progress;
 
   const unresolved = findingsDoc.findings.filter(
     (f) => f.status === "active" && !f.resolved,
@@ -412,6 +429,7 @@ export async function retryUnresolvedAnchors(
     .filter((p): p is string => typeof p === "string");
   const scopedDiff = filterDiffByFiles(diffText, paths);
 
+  progress?.startStep("未解決アンカー再解決", 1);
   return runAgentSafe<{ id: string; existingCode: string }[]>(
     "retryAnchor",
     async () => {
@@ -431,6 +449,7 @@ export async function retryUnresolvedAnchors(
     [],
     debug,
     costSink,
+    progress,
   );
 }
 
@@ -449,7 +468,9 @@ export async function llmVerifyIssues(
   const queryFn = deps.query;
   const debug = deps.debug;
   const costSink = deps.costSink;
+  const progress = deps.progress;
 
+  progress?.startStep("検証", issues.length);
   const results = await Promise.all(
     issues.map(async (issue) => {
       const model = issue.kind === "bug" ? MODEL_HEAVY : MODEL_LIGHT;
@@ -482,6 +503,7 @@ export async function llmVerifyIssues(
         null,
         debug,
         costSink,
+        progress,
       );
       return verdict === null
         ? null
@@ -558,6 +580,7 @@ export async function llmCommentBodies(
   const queryFn = deps.query;
   const debug = deps.debug;
   const costSink = deps.costSink;
+  const progress = deps.progress;
 
   const inlineable = final.issues.filter((i) => i.resolved);
   const deferred = final.issues.filter((i) => !i.resolved);
@@ -572,6 +595,7 @@ export async function llmCommentBodies(
     return { summaryBody, comments: [] };
   }
 
+  progress?.startStep("コメント本文作成", 1);
   const raw = await runAgentSafe<PostReviewInput>(
     "commentBodies",
     async () => {
@@ -589,6 +613,7 @@ export async function llmCommentBodies(
     { summaryBody: "", comments: [] },
     debug,
     costSink,
+    progress,
   );
 
   const byId = new Map(raw.comments.map((c) => [c.id, c]));
