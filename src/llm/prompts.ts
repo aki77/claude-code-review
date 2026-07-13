@@ -26,8 +26,19 @@ export const FALSE_POSITIVE_EXCLUSIONS =
 // ---- モデルエイリアス定数 ----------------------------------------------------
 // runStructured の model はそのまま SDK query() → claude CLI へ渡る（client.ts）。
 // CLI が sonnet/opus エイリアスを解決するのでフルモデル ID をハードコードしない。
-export const MODEL_LIGHT = "sonnet"; // agent1/2/5・rule 検証
-export const MODEL_HEAVY = "opus"; // agent3/4・bug 検証
+// 利用リポジトリごとにプロンプト改変なしで使用モデルを差し替えられるよう環境変数で
+// 上書き可能にする（collect-context.ts のしきい値 env と同じ CODE_REVIEW_* 系）。
+function envModel(v: string | undefined, fallback: string): string {
+  return v?.trim() || fallback;
+}
+export const MODEL_LIGHT = envModel(
+  process.env.CODE_REVIEW_MODEL_LIGHT,
+  "sonnet",
+); // agent1/2/5・rule 検証
+export const MODEL_HEAVY = envModel(
+  process.env.CODE_REVIEW_MODEL_HEAVY,
+  "opus",
+); // agent3/4・bug 検証
 
 // read-only ツール一式（Read/Grep/Glob）。実コードに当たって判断する必要がある
 // ステップ（検証(step6)・agent4 のクロスファイル参照）だけがこれを allowedTools に渡す。
