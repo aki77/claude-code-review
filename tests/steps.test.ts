@@ -12,6 +12,7 @@ import {
   llmReviewAgents,
   llmSummaryAndClusters,
   llmVerifyIssues,
+  retryUnresolvedAnchors,
 } from "../src/llm/steps.ts";
 import { makeFakeQuery, makeThrowingQuery } from "./helpers/fake-query.ts";
 
@@ -328,6 +329,74 @@ describe("llmMergeTexts", () => {
     const doc = findingsDocWithGroup(true);
     const result = await llmMergeTexts(doc, { query });
     expect(result).toEqual([{ groupId: "g1", title: "t1", body: "b1" }]);
+  });
+});
+
+describe("retryUnresolvedAnchors", () => {
+  function findingsDocWithUnresolved(unresolvedCount: number): FindingsDoc {
+    const resolvedFinding = {
+      id: "f1",
+      agent: 1,
+      path: "a.ts",
+      title: "t1",
+      body: "b1",
+      status: "active" as const,
+      resolved: true,
+    };
+    const unresolvedFindings = Array.from(
+      { length: unresolvedCount },
+      (_, i) => ({
+        id: `u${i + 1}`,
+        agent: 3,
+        path: "a.ts",
+        title: `未解決${i + 1}`,
+        body: "b",
+        existingCode: "old code",
+        status: "active" as const,
+        resolved: false,
+        reason: "diff に一意一致しない",
+      }),
+    );
+    const findings = [resolvedFinding, ...unresolvedFindings];
+    return {
+      findings,
+      groups: [],
+      stats: {
+        total: findings.length,
+        valid: findings.length,
+        invalid: 0,
+        outOfScope: 0,
+        resolved: 1,
+        unresolved: unresolvedCount,
+        groups: 0,
+        multiGroups: 0,
+      },
+    };
+  }
+
+  it("未解決0件なら query を呼ばず空配列を返す", async () => {
+    const calls: unknown[] = [];
+    const query = makeFakeQuery({ patches: [] }, { calls });
+    const doc = findingsDocWithUnresolved(0);
+    const result = await retryUnresolvedAnchors(doc, "diff", { query });
+    expect(result).toEqual([]);
+    expect(calls.length).toBe(0);
+  });
+
+  it("未解決ありなら patches を返す", async () => {
+    const query = makeFakeQuery({
+      patches: [{ id: "u1", existingCode: "new code" }],
+    });
+    const doc = findingsDocWithUnresolved(1);
+    const result = await retryUnresolvedAnchors(doc, "diff", { query });
+    expect(result).toEqual([{ id: "u1", existingCode: "new code" }]);
+  });
+
+  it("LLM 失敗時は空配列にフォールバックする", async () => {
+    const query = makeThrowingQuery();
+    const doc = findingsDocWithUnresolved(1);
+    const result = await retryUnresolvedAnchors(doc, "diff", { query });
+    expect(result).toEqual([]);
   });
 });
 

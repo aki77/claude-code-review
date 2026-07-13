@@ -450,6 +450,66 @@ export function verifyUser({
   );
 }
 
+// ---- step4b: 未解決アンカー再解決 ---------------------------------------------
+// 既存の RETRY_ANCHOR_SCHEMA も Anthropic API のトップレベル object 制約に合わせ
+// { patches: [...] } でラップする（FINDINGS_SCHEMA と同型の理由）。
+export const RETRY_ANCHOR_SCHEMA: JSONSchema = {
+  type: "object",
+  properties: {
+    patches: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          existingCode: { type: "string" },
+        },
+        required: ["id", "existingCode"],
+      },
+    },
+  },
+  required: ["patches"],
+};
+
+export function retryAnchorSystem(): string {
+  return (
+    "あなたは diff アンカー（existingCode）の再解決を行うアシスタントです。\n" +
+    "各 finding の existingCode が diff に一意一致せず未解決になりました。diff に実在する" +
+    "連続コード片へ逐語コピーし直してください。\n" +
+    `${EXISTING_CODE_INSTRUCTION}\n` +
+    "id は入力のまま変更せずそのまま返してください。"
+  );
+}
+
+export function retryAnchorUser({
+  unresolved,
+  diffText,
+}: {
+  unresolved: {
+    id: string;
+    path?: string;
+    existingCode?: string;
+    reason?: string;
+  }[];
+  diffText: string;
+}): string {
+  const list = unresolved
+    .map(
+      (f) =>
+        `### id: ${f.id}\n` +
+        `path: ${f.path ?? ""}\n` +
+        `現在の existingCode:\n${f.existingCode ?? ""}\n` +
+        `未解決理由: ${f.reason ?? ""}`,
+    )
+    .join("\n\n");
+  return (
+    `## 未解決 finding 一覧\n${list}\n\n` +
+    `## 差分\n${diffText}\n\n` +
+    "各 finding について、diff に実在する連続コード片へ existingCode を逐語コピーし直し、" +
+    '{ "patches": [{ "id": ..., "existingCode": ... }, ...] } の形で返してください。'
+  );
+}
+
 // ---- step9: PR コメント本文作成 ------------------------------------------------
 
 export function commentBodiesSystem(): string {

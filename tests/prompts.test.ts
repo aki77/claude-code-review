@@ -11,6 +11,9 @@ import {
   MODEL_LIGHT,
   mergeTextSystem,
   mergeTextUser,
+  RETRY_ANCHOR_SCHEMA,
+  retryAnchorSystem,
+  retryAnchorUser,
   reviewMdAgentSystem,
   reviewMdAgentUser,
   ruleAgentSystem,
@@ -256,6 +259,39 @@ describe("verifySystem/User", () => {
     expect(sys).toContain(FALSE_POSITIVE_EXCLUSIONS);
     expect(sys).toContain("既存");
     expect(sys).toContain("リンタ");
+  });
+});
+
+describe("RETRY_ANCHOR_SCHEMA", () => {
+  it("トップレベル object で { patches: [...] } をラップし、id/existingCode が required", () => {
+    expect(RETRY_ANCHOR_SCHEMA.type).toBe("object");
+    expect(RETRY_ANCHOR_SCHEMA.required as string[]).toEqual(["patches"]);
+    const patchesProp = (
+      RETRY_ANCHOR_SCHEMA.properties as {
+        patches: { items: { required: string[] } };
+      }
+    ).patches;
+    expect(patchesProp.items.required).toEqual(["id", "existingCode"]);
+  });
+});
+
+describe("retryAnchorSystem/User", () => {
+  it("行番号を書かない・id をそのまま返す旨を明記する", () => {
+    const sys = retryAnchorSystem();
+    expect(sys).toContain("行番号は書かない");
+    expect(sys).toContain("id は入力のまま変更せずそのまま返して");
+
+    const user = retryAnchorUser({
+      unresolved: [
+        { id: "f1", path: "a.ts", existingCode: "old code", reason: "不一致" },
+      ],
+      diffText: "diff --git a/a.ts b/a.ts\n+foo",
+    });
+    expect(user).toContain("f1");
+    expect(user).toContain("a.ts");
+    expect(user).toContain("old code");
+    expect(user).toContain("不一致");
+    expect(user).toContain("foo");
   });
 });
 

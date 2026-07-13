@@ -39,6 +39,9 @@ import {
   mergeTextSystem,
   mergeTextUser,
   READ_ONLY_TOOLS,
+  RETRY_ANCHOR_SCHEMA,
+  retryAnchorSystem,
+  retryAnchorUser,
   reviewMdAgentSystem,
   reviewMdAgentUser,
   ruleAgentSystem,
@@ -383,6 +386,52 @@ export async function llmMergeTexts(
   );
 
   return results;
+}
+
+// ---- step4b: 未解決アンカー再解決 ---------------------------------------------
+
+// 未解決 finding の existingCode を LLM に逐語コピーし直させ、パッチ配列を返す。
+// パッチ適用（processFindings への再投入）は pipeline.ts 側の責務（既存ステップの
+// 層分離＝LLM 呼び出しと決定論処理を分ける方針に合わせる）。
+export async function retryUnresolvedAnchors(
+  findingsDoc: FindingsDoc,
+  diffText: string,
+  deps: StepDeps = {},
+): Promise<{ id: string; existingCode: string }[]> {
+  const queryFn = deps.query;
+  const debug = deps.debug;
+  const costSink = deps.costSink;
+
+  const unresolved = findingsDoc.findings.filter(
+    (f) => f.status === "active" && !f.resolved,
+  );
+  if (unresolved.length === 0) return [];
+
+  const paths = unresolved
+    .map((f) => f.path)
+    .filter((p): p is string => typeof p === "string");
+  const scopedDiff = filterDiffByFiles(diffText, paths);
+
+  return runAgentSafe<{ id: string; existingCode: string }[]>(
+    "retryAnchor",
+    async () => {
+      const result = await runStructured<{
+        patches: { id: string; existingCode: string }[];
+      }>(
+        {
+          system: retryAnchorSystem(),
+          user: retryAnchorUser({ unresolved, diffText: scopedDiff }),
+          model: MODEL_LIGHT,
+          schema: RETRY_ANCHOR_SCHEMA,
+        },
+        { query: queryFn },
+      );
+      return { ...result, data: result.data.patches };
+    },
+    [],
+    debug,
+    costSink,
+  );
 }
 
 // ---- step6: 検証 --------------------------------------------------------------

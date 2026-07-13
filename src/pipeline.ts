@@ -3,8 +3,9 @@
 // データフロー:
 //   collectContext → diff 取得 → 著者意図情報 → llmSummaryAndClusters →
 //   clusters 確定（validateClusters / tierReducedClusters）→ llmReviewAgents →
-//   processFindings → [step4b スキップ] → llmMergeTexts → mergeFindings →
-//   llmVerifyIssues → applyVerdicts → (pr-review のみ) llmCommentBodies → postReview
+//   processFindings → retryUnresolvedAnchors（未解決のみ・1回だけ）→ llmMergeTexts →
+//   mergeFindings → llmVerifyIssues → applyVerdicts →
+//   (pr-review のみ) llmCommentBodies → postReview
 import type { ModelUsage } from "@anthropic-ai/claude-agent-sdk";
 import { applyVerdicts } from "./lib/apply-verdicts.ts";
 import {
@@ -37,6 +38,7 @@ import {
   llmReviewAgents,
   llmSummaryAndClusters,
   llmVerifyIssues,
+  retryUnresolvedAnchors,
 } from "./llm/steps.ts";
 
 type Exec = typeof execFileAsync;
@@ -153,15 +155,25 @@ async function runReviewCore(
   );
 
   // finding 機械処理。
-  const findingsDoc = processFindings(rawFindings, { ctx, diffText });
+  let findingsDoc = processFindings(rawFindings, { ctx, diffText });
   debug("findingsDoc", findingsDoc);
 
-  // step4b スキップ（Phase 4 では未解決アンカー再解決を行わない）: unresolved 件数のみ
-  // debug 出力する。将来的には retryUnresolvedAnchors(findingsDoc, diffText, ctx) を呼び、
-  // LLM に existingCode を再出力させて processFindings(patch, {ctx, diffText, prev: findingsDoc})
-  // を1回呼ぶ形になる（この関数境界はまだ実装していない）。
+  // step4b: 未解決アンカー再解決。LLM に existingCode を diff に逐語一致するよう
+  // 1回だけ再出力させ、processFindings に prev として再投入して再解決する（ループしない）。
   if (findingsDoc.stats.unresolved > 0) {
-    debug("unresolved-skip", { unresolved: findingsDoc.stats.unresolved });
+    const patches = await retryUnresolvedAnchors(findingsDoc, diffText, {
+      query,
+      debug,
+      costSink,
+    });
+    if (patches.length > 0) {
+      findingsDoc = processFindings(patches, {
+        ctx,
+        diffText,
+        prev: findingsDoc,
+      });
+      debug("findingsDoc:retried", findingsDoc);
+    }
   }
 
   // 統合文章作成。

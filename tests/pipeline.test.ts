@@ -60,7 +60,9 @@ function extractSystemPrompt(systemPrompt?: FakeSystemPrompt): string {
 
 // runStructured の result 経路に合わせたフェイク query。呼び出し内容（system prompt）に
 // 応じて finding/verdict などステップごとに異なる応答を返す。
-function makeFakeQuery() {
+// unresolvedBugExistingCode: 指定するとバグ検出 agent3 が diff に一意一致しない
+// existingCode を返す（step4b の未解決アンカー再解決テスト用）。
+function makeFakeQuery(opts: { unresolvedBugExistingCode?: string } = {}) {
   return ((params: {
     prompt: string;
     options: { systemPrompt?: FakeSystemPrompt };
@@ -89,6 +91,19 @@ function makeFakeQuery() {
           ? [{ id: idMatch[1], commentBody: "コメント本文" }]
           : [],
       };
+    } else if (system.includes("アンカー（existingCode）の再解決")) {
+      // step4b: retryAnchorSystem()。プロンプトに列挙された未解決 finding 全件の id を
+      // そのまま返し、existingCode を diff に実在するコード片へ差し替える
+      // （最初の1件だけ拾うと agent3/agent4 の重複検出時に一部だけ再解決され残ってしまう）。
+      const ids = [...params.prompt.matchAll(/^### id: (\S+)$/gm)].map(
+        (m) => m[1],
+      );
+      structuredOutput = {
+        patches: ids.map((id) => ({
+          id,
+          existingCode: "return x.value; // x は未定義参照",
+        })),
+      };
     } else if (system.includes("統合")) {
       // mergeTextSystem() は「引用元リンク（ルール系の指摘なら...）」という文言を含み
       // system.includes("ルール") にも一致してしまうため、この分岐をルール判定より先に置く。
@@ -107,7 +122,9 @@ function makeFakeQuery() {
             path: "a.ts",
             title: "未定義変数 x への参照",
             body: "x が定義されていないため実行時エラーになる",
-            existingCode: "return x.value; // x は未定義参照",
+            existingCode:
+              opts.unresolvedBugExistingCode ??
+              "return x.value; // x は未定義参照",
             category: "bug",
             severity: "critical",
           },
@@ -167,6 +184,24 @@ describe("runLocalReview", () => {
     expect(ctx.source).toBe("staged");
     expect(ctx.tier).toBe("small");
     expect(final.stats.confirmed).toBe(1);
+    expect(final.issues[0]?.title).toContain("未定義変数");
+  });
+
+  it("agent3 が diff に一意一致しない existingCode を返しても、step4b の再解決で confirmed に到達する", async () => {
+    const exec = makeFakeExec();
+    const query = makeFakeQuery({
+      unresolvedBugExistingCode: "diff に存在しないコード片",
+    });
+    const readFile = () => null;
+
+    const { final } = await runLocalReview(
+      { mode: "range", range: undefined },
+      { debug: false },
+      { exec: exec as never, query, readFile },
+    );
+
+    expect(final.stats.confirmed).toBe(1);
+    expect(final.issues[0]?.resolved).toBe(true);
     expect(final.issues[0]?.title).toContain("未定義変数");
   });
 });
