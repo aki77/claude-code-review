@@ -17,6 +17,7 @@ import type {
   MergeText,
   PostReviewComment,
   PostReviewInput,
+  ReadFileFn,
   Verdict,
 } from "../lib/types.ts";
 import { formatBadge } from "../report.ts";
@@ -339,7 +340,7 @@ export async function llmReviewAgents(
 
 function collectRuleTexts(
   files: { path: string; rules: string[] }[],
-  readFile: (relPath: string) => string | null,
+  readFile: ReadFileFn,
 ): { path: string; content: string | null }[] {
   const rulePaths = new Set<string>();
   for (const f of files) {

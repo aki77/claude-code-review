@@ -34,8 +34,8 @@ pnpm build
 ## 使い方
 
 ```
-code-review local [--range [<range>]] [--debug]
-code-review pr <number> [--comment] [--debug]
+code-review local [--range [<range>]] [--background <text>] [--background-file <path>] [--debug]
+code-review pr <number> [--comment] [--background <text>] [--background-file <path>] [--debug]
 ```
 
 - `local`: ローカルの差分をレビューする。
@@ -52,13 +52,21 @@ code-review pr <number> [--comment] [--debug]
   - `--comment` を付けると、レビュー結果を PR にインラインコメントとして一括投稿する
     （`gh api` 経由）。付けない場合はサマリを標準出力するのみで、投稿・追加の LLM 呼び出しは
     発生しない。
+- `--background, -b <text>`: コミットメッセージや PR 説明からは自動取得できない
+  要件・意図などの背景情報をインラインで渡す（`local` / `pr` 両対応）。自動取得した
+  情報を置き換えるのではなく、末尾に「補足コンテキスト（手動指定）」として併記され、
+  全レビュー agent・検証ステップに伝播する。サニタイズは行われない（raw のまま渡る）。
+- `--background-file, -B <path>`: 同内容をファイルから読み込む。読み込んだ内容は
+  制御文字を除去したうえで 8000 字に切り詰めてから渡される（`--background` と異なり
+  サニタイズされる）。`--background` と両方指定した場合は、インライン指定分が先、
+  ファイル内容がその後に結合される。ファイルが読み込めない場合はエラー終了する。
 - `--debug`: 各 LLM ステップの usage・コストなどをデバッグログとして標準エラーに出力する。
 
 開発時（ビルドせず直接実行）:
 
 ```bash
-pnpm dev -- local [--range [<range>]] [--debug]
-pnpm dev -- pr <number> [--comment] [--debug]
+pnpm dev -- local [--range [<range>]] [--background <text>] [--background-file <path>] [--debug]
+pnpm dev -- pr <number> [--comment] [--background <text>] [--background-file <path>] [--debug]
 ```
 
 ## レビューの観点

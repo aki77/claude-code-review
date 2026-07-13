@@ -268,3 +268,10 @@ export interface ReviewPayload {
 
 // LLM 構造化出力のスキーマ。SDK の JsonSchemaOutputFormat.schema と同形。
 export type JSONSchema = Record<string, unknown>;
+
+// ---- ファイル読込 DI ---------------------------------------------------------
+
+// ファイル読込用の DI 関数型。読めなければ null を返す（例外を投げない）。
+// `src/llm/steps.ts` の defaultReadFile（fs.readFileSync ベース）と
+// `src/lib/background.ts` の loadBackgroundFile が共有する。
+export type ReadFileFn = (relPath: string) => string | null;

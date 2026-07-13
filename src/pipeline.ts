@@ -8,6 +8,7 @@
 //   (pr-review のみ) llmCommentBodies → postReview
 import type { ModelUsage } from "@anthropic-ai/claude-agent-sdk";
 import { applyVerdicts } from "./lib/apply-verdicts.ts";
+import { loadBackgroundFile, mergeAuthorInfo } from "./lib/background.ts";
 import {
   type CollectContextOpts,
   collectContext,
@@ -24,7 +25,7 @@ import {
 } from "./lib/pr-meta.ts";
 import { processFindings } from "./lib/process-findings.ts";
 import { makeProgressReporter, type ProgressReporter } from "./lib/progress.ts";
-import type { Context, FinalDoc } from "./lib/types.ts";
+import type { Context, FinalDoc, ReadFileFn } from "./lib/types.ts";
 import {
   tierReducedClusters,
   validateClusters,
@@ -227,6 +228,26 @@ async function runReviewCore(
   return { final, totalCostUsd };
 }
 
+// --background（インライン）と --background-file（ファイル）を結合し、authorInfo に
+// 併記する。インラインが先頭、ファイル内容がその後に続く（インライン優先）。
+// インラインはサニタイズを通さない（open-code-review 同様 raw）。ファイルのみ
+// loadBackgroundFile 経由でサニタイズ・上限適用される。
+function resolveAuthorInfoWithBackground(
+  authorInfo: string,
+  runOpts: { background?: string; backgroundFile?: string },
+  readFile: ReadFileFn,
+): string {
+  const fileContent = runOpts.backgroundFile
+    ? loadBackgroundFile(runOpts.backgroundFile, readFile)
+    : undefined;
+  // mergeAuthorInfo は空/空白のみの background を無視するので、ここでは
+  // 早期return せず常に呼ぶだけでよい。
+  const background = [runOpts.background, fileContent]
+    .filter(Boolean)
+    .join("\n\n");
+  return mergeAuthorInfo(authorInfo, background);
+}
+
 function makeDebugSink(enabled: boolean): DebugSink {
   return enabled
     ? (label, obj) => {
@@ -239,7 +260,12 @@ function makeDebugSink(enabled: boolean): DebugSink {
 
 export async function runLocalReview(
   opts: CollectContextOpts,
-  runOpts: { debug: boolean; quiet?: boolean },
+  runOpts: {
+    debug: boolean;
+    quiet?: boolean;
+    background?: string;
+    backgroundFile?: string;
+  },
   deps: PipelineDeps = {},
 ): Promise<PipelineResult> {
   const exec = deps.exec ?? execFileAsync;
@@ -275,6 +301,7 @@ export async function runLocalReview(
     } else {
       authorInfo = `（コミットメッセージなし）${DIFF_ONLY_AUTHOR_INFO}`;
     }
+    authorInfo = resolveAuthorInfoWithBackground(authorInfo, runOpts, readFile);
 
     const result = await runReviewCore(ctx, authorInfo, false, {
       exec,
@@ -294,7 +321,13 @@ export async function runLocalReview(
 
 export async function runPrReview(
   pr: string,
-  runOpts: { debug: boolean; comment: boolean; quiet?: boolean },
+  runOpts: {
+    debug: boolean;
+    comment: boolean;
+    quiet?: boolean;
+    background?: string;
+    backgroundFile?: string;
+  },
   deps: PipelineDeps = {},
 ): Promise<PrReviewResult> {
   const exec = deps.exec ?? execFileAsync;
@@ -328,7 +361,11 @@ export async function runPrReview(
     debug("ctx", ctx);
     progress.succeedStep();
 
-    const authorInfo = formatPrAuthorInfo(meta);
+    const authorInfo = resolveAuthorInfoWithBackground(
+      formatPrAuthorInfo(meta),
+      runOpts,
+      readFile,
+    );
 
     const result = await runReviewCore(ctx, authorInfo, ctx.tier === "small", {
       exec,

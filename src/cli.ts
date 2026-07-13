@@ -24,11 +24,13 @@ export type ParsedArgs = {
   debug: boolean;
   quiet: boolean;
   help: boolean;
+  background?: string;
+  backgroundFile?: string;
 };
 
 const USAGE = `Usage:
-  code-review local [--range [<range>]] [--debug] [--quiet]
-  code-review pr <number> [--comment] [--debug] [--quiet]
+  code-review local [--range [<range>]] [--background <text>] [--background-file <path>] [--debug] [--quiet]
+  code-review pr <number> [--comment] [--background <text>] [--background-file <path>] [--debug] [--quiet]
   code-review --help
 
 Commands:
@@ -36,11 +38,13 @@ Commands:
   pr <number>        指定した PR をレビューする
 
 Options:
-  --range [<range>]  local 専用。差分範囲を指定（省略時は staged を自動判別）
-  --comment          pr 専用。レビュー結果を PR にインラインコメントとして投稿する
-  --debug            デバッグログを出力する
-  --quiet, -q        進捗表示を抑制する
-  -h, --help         このヘルプを表示する
+  --range [<range>]             local 専用。差分範囲を指定（省略時は staged を自動判別）
+  --comment                     pr 専用。レビュー結果を PR にインラインコメントとして投稿する
+  --background, -b <text>       自動取得できない背景情報（要件・意図）をインラインで指定する
+  --background-file, -B <path>  背景情報をファイルから読み込む（8000字上限・サニタイズ適用）
+  --debug                       デバッグログを出力する
+  --quiet, -q                   進捗表示を抑制する
+  -h, --help                    このヘルプを表示する
 `;
 
 export class UsageError extends Error {}
@@ -54,6 +58,21 @@ function isFlag(token: string | undefined): boolean {
  * `parseFlags` (claude-plugins/.../scripts/lib/artifact.mjs:88) を踏襲しつつ、
  * サブコマンド（位置引数）と、値省略可能なフラグ（--range）を扱えるように拡張したもの。
  */
+// 値必須フラグ（--background/-b, --background-file/-B）の次トークンを取り出し、
+// 消費後のインデックス（呼び出し元の while ループが次に読む位置）を返す。
+// --range と異なり値省略は不可なので、次トークンが無い/フラグなら UsageError にする。
+function consumeRequiredValue(
+  argv: string[],
+  i: number,
+  flagName: string,
+): { value: string; nextIndex: number } {
+  const next = argv[i + 1];
+  if (isFlag(next) || next === undefined) {
+    throw new UsageError(`${flagName} には値が必要です`);
+  }
+  return { value: next, nextIndex: i + 2 };
+}
+
 export function parseArgs(argv: string[]): ParsedArgs {
   let help = false;
   let comment = false;
@@ -62,6 +81,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let range: string | true | undefined;
   let command: Command | undefined;
   let prNumber: number | undefined;
+  let background: string | undefined;
+  let backgroundFile: string | undefined;
 
   let i = 0;
   while (i < argv.length) {
@@ -110,6 +131,24 @@ export function parseArgs(argv: string[]): ParsedArgs {
       continue;
     }
 
+    if (token === "--background" || token === "-b") {
+      ({ value: background, nextIndex: i } = consumeRequiredValue(
+        argv,
+        i,
+        token,
+      ));
+      continue;
+    }
+
+    if (token === "--background-file" || token === "-B") {
+      ({ value: backgroundFile, nextIndex: i } = consumeRequiredValue(
+        argv,
+        i,
+        token,
+      ));
+      continue;
+    }
+
     if (isFlag(token)) {
       throw new UsageError(`unknown option: ${token}`);
     }
@@ -145,6 +184,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
       debug,
       quiet,
       range,
+      background,
+      backgroundFile,
     };
   }
 
@@ -156,7 +197,17 @@ export function parseArgs(argv: string[]): ParsedArgs {
     throw new UsageError("missing PR number");
   }
 
-  return { command, prNumber, range, comment, debug, quiet, help };
+  return {
+    command,
+    prNumber,
+    range,
+    comment,
+    debug,
+    quiet,
+    help,
+    background,
+    backgroundFile,
+  };
 }
 
 async function dispatch(args: ParsedArgs): Promise<number> {
@@ -172,7 +223,12 @@ async function dispatch(args: ParsedArgs): Promise<number> {
     try {
       const { final, ctx } = await runLocalReview(
         { mode: "range", range: rangeOpt },
-        { debug: args.debug, quiet: args.quiet },
+        {
+          debug: args.debug,
+          quiet: args.quiet,
+          background: args.background,
+          backgroundFile: args.backgroundFile,
+        },
       );
       printSummary(final, ctx);
       return final.stats.confirmed > 0 ? 1 : 0;
@@ -191,6 +247,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
           debug: args.debug,
           comment: args.comment,
           quiet: args.quiet,
+          background: args.background,
+          backgroundFile: args.backgroundFile,
         },
       );
       printSummary(final, ctx);

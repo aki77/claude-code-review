@@ -22,4 +22,59 @@ describe("parseArgs", () => {
     expect(() => parseArgs(["local", "-x"])).toThrow(UsageError);
     expect(() => parseArgs(["local", "-x"])).toThrow(/unknown option: -x/);
   });
+
+  it("--background / -b で背景情報をインラインで指定できる（local）", () => {
+    const args = parseArgs(["local", "--background", "認証に注目"]);
+    expect(args.background).toBe("認証に注目");
+  });
+
+  it("-b は --background の短縮形として同じ値をパースする", () => {
+    const args = parseArgs(["local", "-b", "認証に注目"]);
+    expect(args.background).toBe("認証に注目");
+  });
+
+  it("--background-file / -B で背景情報ファイルのパスを指定できる（pr）", () => {
+    const args = parseArgs(["pr", "123", "--background-file", "./docs/req.md"]);
+    expect(args.backgroundFile).toBe("./docs/req.md");
+  });
+
+  it("-B は --background-file の短縮形として同じ値をパースする", () => {
+    const args = parseArgs(["pr", "123", "-B", "./docs/req.md"]);
+    expect(args.backgroundFile).toBe("./docs/req.md");
+  });
+
+  it("--background と --background-file を併用できる", () => {
+    const args = parseArgs([
+      "pr",
+      "123",
+      "-b",
+      "認証に注目",
+      "-B",
+      "./docs/req.md",
+    ]);
+    expect(args.background).toBe("認証に注目");
+    expect(args.backgroundFile).toBe("./docs/req.md");
+  });
+
+  it("--background の値が欠落している場合は UsageError", () => {
+    expect(() => parseArgs(["local", "--background"])).toThrow(UsageError);
+    expect(() => parseArgs(["local", "--background"])).toThrow(
+      /--background には値が必要です/,
+    );
+  });
+
+  it("--background の直後に別フラグが来た場合も値欠落として拒否する", () => {
+    expect(() => parseArgs(["local", "--background", "--debug"])).toThrow(
+      UsageError,
+    );
+  });
+
+  it("--background-file の値が欠落している場合は UsageError", () => {
+    expect(() => parseArgs(["pr", "123", "--background-file"])).toThrow(
+      UsageError,
+    );
+    expect(() => parseArgs(["pr", "123", "--background-file"])).toThrow(
+      /--background-file には値が必要です/,
+    );
+  });
 });
