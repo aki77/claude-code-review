@@ -3,6 +3,7 @@
 // runStructured は query() の async generator から `{type:"result", subtype:"success", ...}`
 // の1メッセージを待つ（client.ts の result 経路）。このヘルパーはその1メッセージだけを
 // yield するフェイクを作り、実際の LLM を呼ばずに runStructured を実際に通す。
+import { AbortError } from "@anthropic-ai/claude-agent-sdk";
 import type { QueryFn } from "../../src/llm/client.ts";
 
 type QueryCall = { prompt: unknown; options: unknown };
@@ -48,6 +49,17 @@ export function makeFakeQuery(
 export function makeThrowingQuery(message = "fake failure"): QueryFn {
   const fakeQuery = (() => {
     throw new Error(message);
+  }) as unknown as QueryFn;
+  return fakeQuery;
+}
+
+// AbortError を throw するフェイク query（runAgentSafe が abort 由来のみ再 throw する
+// ことの検証用）。SDK の AbortError インスタンスを投げる。SDK の実装は空ボディ
+// （class st extends Error {}）で name/code を設定しないため、makeThrowingQuery と異なり
+// error.name は "Error" のままになる（isAbortError の instanceof 判定でのみ検出できる）。
+export function makeAbortingQuery(): QueryFn {
+  const fakeQuery = (() => {
+    throw new AbortError("Claude Code process aborted by user");
   }) as unknown as QueryFn;
   return fakeQuery;
 }

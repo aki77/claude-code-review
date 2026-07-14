@@ -187,6 +187,34 @@ describe("runLocalReview", () => {
     expect(final.issues[0]?.title).toContain("未定義変数");
   });
 
+  it("abortController.signal が全 exec 呼び出しに配線される（boundExec 経由）", async () => {
+    const receivedSignals: (AbortSignal | undefined)[] = [];
+    const baseExec = makeFakeExec();
+    const exec = async (
+      command: string,
+      args: string[],
+      options?: { signal?: AbortSignal },
+    ) => {
+      receivedSignals.push(options?.signal);
+      return baseExec(command, args, options);
+    };
+    const query = makeFakeQuery();
+    const readFile = () => null;
+    const abortController = new AbortController();
+    abortController.abort();
+
+    await runLocalReview(
+      { mode: "range", range: undefined },
+      { debug: false, quiet: true, abortController },
+      { exec: exec as never, query, readFile },
+    );
+
+    expect(receivedSignals.length).toBeGreaterThan(0);
+    for (const signal of receivedSignals) {
+      expect(signal?.aborted).toBe(true);
+    }
+  });
+
   it("agent3 が diff に一意一致しない existingCode を返しても、step4b の再解決で confirmed に到達する", async () => {
     const exec = makeFakeExec();
     const query = makeFakeQuery({

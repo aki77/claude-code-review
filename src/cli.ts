@@ -11,6 +11,7 @@
  * 実装ロジック（git/gh 呼び出し・LLM・レビュー処理）はここには書かない
  * （src/pipeline.ts / src/report.ts に委譲する）。
  */
+import { isAbortError } from "./lib/abort.ts";
 import { runLocalReview, runPrReview } from "./pipeline.ts";
 import { printSummary } from "./report.ts";
 
@@ -210,7 +211,22 @@ export function parseArgs(argv: string[]): ParsedArgs {
   };
 }
 
-async function dispatch(args: ParsedArgs): Promise<number> {
+// runLocalReview/runPrReview 共通のエラー→終了コード変換。abort 由来（Ctrl+C 中断）は
+// 130、それ以外は従来どおり 1 にし、local/pr 双方で同じ分岐をコピーしないようにする。
+function reportError(error: unknown): number {
+  if (isAbortError(error)) {
+    process.stderr.write("中断されました\n");
+    return 130;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  process.stderr.write(`error: ${message}\n`);
+  return 1;
+}
+
+async function dispatch(
+  args: ParsedArgs,
+  abortController: AbortController,
+): Promise<number> {
   if (args.help) {
     process.stdout.write(USAGE);
     return 0;
@@ -228,14 +244,13 @@ async function dispatch(args: ParsedArgs): Promise<number> {
           quiet: args.quiet,
           background: args.background,
           backgroundFile: args.backgroundFile,
+          abortController,
         },
       );
       printSummary(final, ctx);
       return final.stats.confirmed > 0 ? 1 : 0;
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      process.stderr.write(`error: ${message}\n`);
-      return 1;
+      return reportError(error);
     }
   }
 
@@ -249,19 +264,34 @@ async function dispatch(args: ParsedArgs): Promise<number> {
           quiet: args.quiet,
           background: args.background,
           backgroundFile: args.backgroundFile,
+          abortController,
         },
       );
       printSummary(final, ctx);
       if (postedUrl) process.stdout.write(`posted: ${postedUrl}\n`);
       return final.stats.confirmed > 0 ? 1 : 0;
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      process.stderr.write(`error: ${message}\n`);
-      return 1;
+      return reportError(error);
     }
   }
 
   return 1;
+}
+
+// SIGINT を受けて協調的キャンセルを行う。1回目は abortController.abort() で実行中の
+// query()/execFile を止め、各ステップの後始末（progress.done() 等）を通常の finally 経路に
+// 任せる。2回目（1回目の abort がまだ効いていない間に再度押された場合）は強制 exit(130)。
+function installSigintHandler(abortController: AbortController): void {
+  let aborted = false;
+  process.on("SIGINT", () => {
+    if (!aborted) {
+      aborted = true;
+      process.stderr.write("\n中断しています…（もう一度 Ctrl+C で強制終了）\n");
+      abortController.abort();
+      return;
+    }
+    process.exit(130);
+  });
 }
 
 async function main(): Promise<void> {
@@ -279,7 +309,10 @@ async function main(): Promise<void> {
     throw error;
   }
 
-  process.exit(await dispatch(args));
+  const abortController = new AbortController();
+  installSigintHandler(abortController);
+
+  process.exit(await dispatch(args, abortController));
 }
 
 // CLI として直接実行されたときのみエントリポイントを起動する。

@@ -37,6 +37,9 @@ export interface RunStructuredOpts {
   // MCP サーバ設定（context7 など）。レビュー系ステップに context7 を渡す。
   // CODE_REVIEW_DISABLE_CONTEXT7 で口を閉じられる（buildMcpServers が undefined を返す）。
   mcpServers?: Record<string, McpServerConfig>;
+  // Ctrl+C 中断伝播用。SDK は AbortController インスタンスを要求する
+  // （options.abortController）ため、末端まで AbortController のまま配線する。
+  abortController?: AbortController;
 }
 
 export interface RunStructuredResult<T> {
@@ -100,6 +103,9 @@ export async function runStructured<T>(
       ? { outputFormat: { type: "json_schema" as const, schema: opts.schema } }
       : {}),
     ...(opts.mcpServers !== undefined ? { mcpServers: opts.mcpServers } : {}),
+    ...(opts.abortController !== undefined
+      ? { abortController: opts.abortController }
+      : {}),
   };
 
   const result = await runQueryUntilResult(queryFn, opts.user, options);

@@ -1,3 +1,4 @@
+import { AbortError } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, it } from "vitest";
 import type {
   Context,
@@ -14,7 +15,11 @@ import {
   llmVerifyIssues,
   retryUnresolvedAnchors,
 } from "../src/llm/steps.ts";
-import { makeFakeQuery, makeThrowingQuery } from "./helpers/fake-query.ts";
+import {
+  makeAbortingQuery,
+  makeFakeQuery,
+  makeThrowingQuery,
+} from "./helpers/fake-query.ts";
 
 function baseCtx(overrides: Partial<Context> = {}): Context {
   return {
@@ -339,6 +344,20 @@ describe("llmReviewAgents", () => {
       { query, readFile: () => null },
     );
     expect(findings).toEqual([]);
+  });
+
+  it("runAgentSafe: AbortError は空 fallback に握り潰さず再 throw する（Ctrl+C 中断伝播）", async () => {
+    const query = makeAbortingQuery();
+    const ctx = baseCtx({
+      tier: "small",
+      assignments: [{ files: [{ path: "a.ts", rules: [] }] }, { files: [] }],
+    });
+    await expect(
+      llmReviewAgents(
+        { ctx, diffText: "diff", clusters: [], summary: null },
+        { query, readFile: () => null },
+      ),
+    ).rejects.toBeInstanceOf(AbortError);
   });
 });
 

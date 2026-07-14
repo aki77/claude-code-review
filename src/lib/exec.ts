@@ -4,6 +4,7 @@
 //
 // 02a では未使用（02c/02d が依存するため先に用意）。
 import { execFile } from "node:child_process";
+import { isAbortError } from "./abort.ts";
 
 export interface ExecResult {
   stdout: string;
@@ -14,16 +15,27 @@ export interface ExecResult {
 export function execFileAsync(
   command: string,
   args: string[],
-  options: { cwd?: string; maxBuffer?: number; input?: string } = {},
+  options: {
+    cwd?: string;
+    maxBuffer?: number;
+    input?: string;
+    signal?: AbortSignal;
+  } = {},
 ): Promise<ExecResult> {
   const { input, ...execOptions } = options;
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const child = execFile(
       command,
       args,
       { encoding: "utf8", ...execOptions },
       (error, stdout, stderr) => {
         if (error) {
+          // abort 由来のエラーは「非0終了でも resolve」の既定方針から除外し、
+          // 中断を上位（呼び出し元の runReviewCore 等）へ伝播させるため reject する。
+          if (isAbortError(error)) {
+            reject(error);
+            return;
+          }
           const code =
             typeof error.code === "number"
               ? error.code

@@ -9,6 +9,7 @@ import type {
   McpServerConfig,
   ModelUsage,
 } from "@anthropic-ai/claude-agent-sdk";
+import { isAbortError } from "../lib/abort.ts";
 import type { ProgressReporter } from "../lib/progress.ts";
 import type {
   Assignment,
@@ -72,6 +73,8 @@ export interface StepDeps {
   debug?: DebugSink;
   costSink?: CostSink;
   progress?: ProgressReporter;
+  // Ctrl+C 中断伝播用。渡すと各 runStructured 呼び出しに abortController として配線される。
+  abortController?: AbortController;
 }
 
 // デフォルトの readFile: fs.readFileSync、例外→null。
@@ -104,6 +107,11 @@ async function runAgentSafe<T>(
     costSink?.(result.modelUsage);
     return result.data;
   } catch (error) {
+    // Ctrl+C 中断由来のエラーは「1エージェント失敗を空 fallback で握り潰す」対象外。
+    // 握り潰すと各エージェントが空 findings を返して処理が続行してしまい、中断が効かない。
+    if (isAbortError(error)) {
+      throw error;
+    }
     debug?.(`agent:${label}:failed`, {
       error: error instanceof Error ? error.message : error,
     });
@@ -124,6 +132,7 @@ async function runFindingsAgent(
   reviewOpts: {
     allowedTools?: string[];
     mcpServers?: Record<string, McpServerConfig>;
+    abortController?: AbortController;
   } = {},
 ): Promise<RunStructuredResult<unknown[]>> {
   const result = await runStructured<{ findings: unknown[] }>(
@@ -166,6 +175,7 @@ export async function llmSummaryAndClusters(
           user: summaryClustersUser({ authorInfo, diffText, wantClusters }),
           model: MODEL_LIGHT,
           schema: wantClusters ? SUMMARY_CLUSTERS_SCHEMA : SUMMARY_ONLY_SCHEMA,
+          abortController: deps.abortController,
         },
         { query: queryFn },
       );
@@ -232,8 +242,8 @@ export async function llmReviewAgents(
   const debug = deps.debug;
   const costSink = deps.costSink;
   const progress = deps.progress;
-  // 全レビュー系エージェント（agent1〜5）共通の allowedTools/mcpServers。
-  const reviewOpts = buildReviewOpts();
+  // 全レビュー系エージェント（agent1〜5）共通の allowedTools/mcpServers（＋中断用 abortController）。
+  const reviewOpts = buildReviewOpts(deps.abortController);
 
   const tasks: Promise<unknown[]>[] = [];
 
@@ -395,6 +405,7 @@ export async function llmMergeTexts(
               user: mergeTextUser({ members }),
               model: MODEL_LIGHT,
               schema: MERGE_TEXT_SCHEMA,
+              abortController: deps.abortController,
             },
             { query: queryFn },
           );
@@ -453,6 +464,7 @@ export async function retryUnresolvedAnchors(
           user: retryAnchorUser({ unresolved, diffText: scopedDiff }),
           model: MODEL_LIGHT,
           schema: RETRY_ANCHOR_SCHEMA,
+          abortController: deps.abortController,
         },
         { query: queryFn },
       );
@@ -482,7 +494,7 @@ export async function llmVerifyIssues(
   const costSink = deps.costSink;
   const progress = deps.progress;
   // レビュー系ステップ共通の allowedTools/mcpServers（agent1〜5 と同一方針。steps.ts 冒頭参照）。
-  const reviewOpts = buildReviewOpts();
+  const reviewOpts = buildReviewOpts(deps.abortController);
 
   progress?.startStep("検証", issues.length);
   const results = await Promise.all(
@@ -619,6 +631,7 @@ export async function llmCommentBodies(
           user: commentBodiesUser({ inlineable, deferred }),
           model: MODEL_LIGHT,
           schema: COMMENT_BODIES_SCHEMA,
+          abortController: deps.abortController,
         },
         { query: queryFn },
       );

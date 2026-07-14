@@ -45,6 +45,14 @@ import {
 
 type Exec = typeof execFileAsync;
 
+// abortController.signal を束ねた exec ラッパを作る。runLocalReview / runPrReview
+// 双方の入口で同じ組み立てが必要なため1箇所に集約する（signal を後勝ちにすることで
+// 既存呼び出しが maxBuffer 等の他オプションを渡していても壊さない）。
+function bindExecSignal(exec: Exec, signal: AbortSignal | undefined): Exec {
+  return (command, args, options) =>
+    exec(command, args, { ...options, signal });
+}
+
 export interface PipelineDeps {
   exec?: Exec;
   query?: QueryFn;
@@ -79,9 +87,10 @@ async function runReviewCore(
     Pick<PipelineDeps, "query"> & {
       debug: DebugSink;
       progress: ProgressReporter;
+      abortController?: AbortController;
     },
 ): Promise<{ final: FinalDoc; totalCostUsd: number }> {
-  const { exec, query, readFile, debug, progress } = deps;
+  const { exec, query, readFile, debug, progress, abortController } = deps;
 
   // 実行全体のコスト集計。モデルIDごとに ModelUsage を加算し、debug("cost-summary", ...) で
   // final の直後に出力する（SDK の result.modelUsage をそのまま集計するため、モデル混在時も
@@ -108,6 +117,18 @@ async function runReviewCore(
         }
       }
     }
+  };
+
+  // 各 LLM ステップ共通の deps。readFile が不要なステップにも渡るが、StepDeps は
+  // 全フィールド optional なので害はない（呼び出しサイトごとに個別組み立てしていた
+  // abortController 追記の重複を1箇所に集約する）。
+  const stepDeps = {
+    query,
+    readFile,
+    debug,
+    costSink,
+    progress,
+    abortController,
   };
 
   // diff 取得（統一 diff。以降の全ステップがこの diff を使う）。
@@ -139,12 +160,12 @@ async function runReviewCore(
     summary = authorInfo;
     rawClusters = [];
   } else {
-    const result = await llmSummaryAndClusters(ctx, diffText, authorInfo, {
-      query,
-      debug,
-      costSink,
-      progress,
-    });
+    const result = await llmSummaryAndClusters(
+      ctx,
+      diffText,
+      authorInfo,
+      stepDeps,
+    );
     summary = result.summary;
     rawClusters = result.rawClusters;
     progress.succeedStep();
@@ -161,7 +182,7 @@ async function runReviewCore(
   // レビューエージェント(agent1〜5)。
   const rawFindings = await llmReviewAgents(
     { ctx, diffText, clusters: clustersDoc.clusters, summary },
-    { query, readFile, debug, costSink, progress },
+    stepDeps,
   );
 
   // finding 機械処理。
@@ -172,12 +193,11 @@ async function runReviewCore(
   // step4b: 未解決アンカー再解決。LLM に existingCode を diff に逐語一致するよう
   // 1回だけ再出力させ、processFindings に prev として再投入して再解決する（ループしない）。
   if (findingsDoc.stats.unresolved > 0) {
-    const patches = await retryUnresolvedAnchors(findingsDoc, diffText, {
-      query,
-      debug,
-      costSink,
-      progress,
-    });
+    const patches = await retryUnresolvedAnchors(
+      findingsDoc,
+      diffText,
+      stepDeps,
+    );
     if (patches.length > 0) {
       findingsDoc = processFindings(patches, {
         ctx,
@@ -190,12 +210,7 @@ async function runReviewCore(
   }
 
   // 統合文章作成。
-  const mergeTexts = await llmMergeTexts(findingsDoc, {
-    query,
-    debug,
-    costSink,
-    progress,
-  });
+  const mergeTexts = await llmMergeTexts(findingsDoc, stepDeps);
   debug("mergeTexts", mergeTexts);
   if (mergeTexts.length > 0) progress.succeedStep();
 
@@ -204,12 +219,12 @@ async function runReviewCore(
   debug("issuesDoc", issuesDoc);
 
   // 検証。
-  const verdicts = await llmVerifyIssues(issuesDoc.issues, diffText, summary, {
-    query,
-    debug,
-    costSink,
-    progress,
-  });
+  const verdicts = await llmVerifyIssues(
+    issuesDoc.issues,
+    diffText,
+    summary,
+    stepDeps,
+  );
   debug("verdicts", verdicts);
 
   // FINAL 生成。applyVerdicts が confirmed/rejected を集計済みなので、
@@ -265,10 +280,12 @@ export async function runLocalReview(
     quiet?: boolean;
     background?: string;
     backgroundFile?: string;
+    abortController?: AbortController;
   },
   deps: PipelineDeps = {},
 ): Promise<PipelineResult> {
   const exec = deps.exec ?? execFileAsync;
+  const boundExec = bindExecSignal(exec, runOpts.abortController?.signal);
   const query = deps.query;
   const readFile = deps.readFile ?? defaultReadFile;
   const debug = makeDebugSink(runOpts.debug);
@@ -280,7 +297,7 @@ export async function runLocalReview(
   let totalCostUsd = 0;
   try {
     progress.startStep("コンテキスト収集");
-    const ctx = await collectContext(opts, { exec });
+    const ctx = await collectContext(opts, { exec: boundExec });
     debug("ctx", ctx);
     progress.succeedStep();
 
@@ -290,7 +307,7 @@ export async function runLocalReview(
     if (ctx.source === "staged") {
       authorInfo = `ステージ済み変更・コミットなし。${DIFF_ONLY_AUTHOR_INFO}`;
     } else if (ctx.range) {
-      const logResult = await exec("git", [
+      const logResult = await boundExec("git", [
         "log",
         "--format=%H%n%s%n%b%n---",
         ctx.range,
@@ -304,11 +321,12 @@ export async function runLocalReview(
     authorInfo = resolveAuthorInfoWithBackground(authorInfo, runOpts, readFile);
 
     const result = await runReviewCore(ctx, authorInfo, false, {
-      exec,
+      exec: boundExec,
       query,
       readFile,
       debug,
       progress,
+      abortController: runOpts.abortController,
     });
     totalCostUsd = result.totalCostUsd;
 
@@ -327,10 +345,12 @@ export async function runPrReview(
     quiet?: boolean;
     background?: string;
     backgroundFile?: string;
+    abortController?: AbortController;
   },
   deps: PipelineDeps = {},
 ): Promise<PrReviewResult> {
   const exec = deps.exec ?? execFileAsync;
+  const boundExec = bindExecSignal(exec, runOpts.abortController?.signal);
   const query = deps.query;
   const readFile = deps.readFile ?? defaultReadFile;
   const debug = makeDebugSink(runOpts.debug);
@@ -344,11 +364,11 @@ export async function runPrReview(
     // step0: PR メタ取得（headRefOid・baseRefOid・baseRefName を含む。gh pr view の
     // 重複呼び出しを避ける。collectContext の PR モードにも baseRef として渡す）。
     progress.startStep("コンテキスト収集");
-    const meta = await fetchPrMeta(pr, { exec });
+    const meta = await fetchPrMeta(pr, { exec: boundExec });
     debug("prMeta", meta);
 
     // step0: ローカル HEAD と PR HEAD の一致ゲート。LLM コストを一切かける前に確認する。
-    await assertPrHeadMatches(pr, meta.headRefOid, { exec });
+    await assertPrHeadMatches(pr, meta.headRefOid, { exec: boundExec });
 
     const ctx = await collectContext(
       {
@@ -356,7 +376,7 @@ export async function runPrReview(
         pr,
         baseRef: { baseRefOid: meta.baseRefOid, baseRefName: meta.baseRefName },
       },
-      { exec },
+      { exec: boundExec },
     );
     debug("ctx", ctx);
     progress.succeedStep();
@@ -368,11 +388,12 @@ export async function runPrReview(
     );
 
     const result = await runReviewCore(ctx, authorInfo, ctx.tier === "small", {
-      exec,
+      exec: boundExec,
       query,
       readFile,
       debug,
       progress,
+      abortController: runOpts.abortController,
     });
     totalCostUsd = result.totalCostUsd;
     const { final } = result;
@@ -381,11 +402,11 @@ export async function runPrReview(
       return { final, ctx, headRefOid: meta.headRefOid };
     }
 
-    const nameWithOwner = await getNameWithOwner({ exec });
+    const nameWithOwner = await getNameWithOwner({ exec: boundExec });
     const postInput = await llmCommentBodies(
       final,
       { prHeadSha: meta.headRefOid, nameWithOwner },
-      { query, debug, progress },
+      { query, debug, progress, abortController: runOpts.abortController },
     );
     debug("postInput", postInput);
     if (final.issues.filter((i) => i.resolved).length > 0) {
@@ -398,7 +419,7 @@ export async function runPrReview(
       postInput,
       final,
       commitId: meta.headRefOid,
-      exec,
+      exec: boundExec,
     });
     progress.succeedStep();
 

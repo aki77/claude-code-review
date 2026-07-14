@@ -74,15 +74,18 @@ export function reviewTools(): string[] {
 }
 
 // 全レビュー系ステップ（agent1〜5＋検証step6）共通の runStructured オプション
-// （allowedTools/mcpServers）。steps.ts の llmReviewAgents/llmVerifyIssues の
+// （allowedTools/mcpServers/abortController）。steps.ts の llmReviewAgents/llmVerifyIssues の
 // 双方で同じ組み立てが必要なため、ここを単一の情報源にする。
-export function buildReviewOpts(): {
+// abortController は Ctrl+C 中断伝播用（省略時は undefined のまま素通しする）。
+export function buildReviewOpts(abortController?: AbortController): {
   allowedTools: string[];
   mcpServers: Record<string, McpServerConfig> | undefined;
+  abortController: AbortController | undefined;
 } {
   return {
     allowedTools: reviewTools(),
     mcpServers: buildReviewMcpServers(),
+    abortController,
   };
 }
 
