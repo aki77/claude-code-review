@@ -25,11 +25,17 @@ pnpm format  # biome check --write（自動修正）
 - **行番号は LLM に推測させない**。LLM は diff 中の実在コード片 `existingCode` だけを
   出力し、行番号は `resolveAnchor`（`src/lib/diff-anchor.ts`）で機械的に確定する。
 - 成果物はメモリ上のオブジェクトで各ステップ間を受け渡す（一時ファイル経由にしない）。
-- **LLM ステップは既定 `allowedTools: []`（ツール不可のワンショット）**。ただし
-  read-only ツール（Read/Grep/Glob）は持たせてよい方針で、検証(step6)・agent4
-  （クロスファイル参照）は実コードに当たって判断する必要があるため明示的に許可している
-  （`src/llm/client.ts` の `RunStructuredOpts.allowedTools`）。write 系ツールは
-  一切許可しない（作業ツリーを変更しない）。
+- **非レビュー系 LLM ステップ**（step2 要約/クラスタ・step5 マージ・step9 コメント整形・
+  step4b アンカー再解決）**は既定 `allowedTools: []`（ツール不可のワンショット）**。
+- **レビュー系ステップ（agent1〜5＋検証step6）はレビュー精度を優先し、read-only ツール
+  （Read/Grep/Glob）＋ context7 MCP（既定 ON、依存ライブラリの実仕様確認用）を常時付与する**
+  （`src/llm/prompts.ts` の `reviewTools()`／`src/lib/mcp-config.ts` の
+  `buildReviewMcpServers()`。`CODE_REVIEW_DISABLE_CONTEXT7=1`（または `=true`、大小文字無視）
+  で context7 を無効化できる）。
+  WebFetch/WebSearch は `CODE_REVIEW_ENABLE_WEB=1`（または `=true`、大小文字無視）で opt-in。
+  write 系ツールは一切許可しない
+  （作業ツリーを変更しない）。ツール利用がある分レビュー再実行の決定論性は下がるが、これは
+  意図した方針判断（ユーザーが精度優先を明言）。
 
 ## 認証方針（重要な制約）
 

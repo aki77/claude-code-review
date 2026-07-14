@@ -5,7 +5,7 @@ import type {
   FindingsDoc,
   Issue,
 } from "../src/lib/types.ts";
-import { READ_ONLY_TOOLS } from "../src/llm/prompts.ts";
+import { reviewTools } from "../src/llm/prompts.ts";
 import {
   llmCommentBodies,
   llmMergeTexts,
@@ -159,7 +159,7 @@ describe("llmReviewAgents", () => {
     expect(calls.length).toBe(3);
   });
 
-  it("agent4 は read-only ツール（Read/Grep/Glob）を許可して呼び出す", async () => {
+  it("agent3/agent4 とも read-only ツール（Read/Grep/Glob）を許可して呼び出す（精度優先の方針）", async () => {
     const calls: { prompt: unknown; options: unknown }[] = [];
     const query = makeFakeQuery({ findings: [] }, { calls });
     const ctx = baseCtx({
@@ -179,10 +179,97 @@ describe("llmReviewAgents", () => {
       { ctx, diffText: "diff", clusters, summary: null },
       { query, readFile: () => null },
     );
-    // agent3（diff限定・ツール無し）+ agent4（cluster、ツール許可）の2回。
+    // agent3（diff限定を撤廃・ツール許可）+ agent4（cluster、ツール許可）の2回。
     expect(calls).toHaveLength(2);
-    const agent4Options = calls[1]?.options as { allowedTools?: string[] };
-    expect(agent4Options.allowedTools).toEqual([...READ_ONLY_TOOLS]);
+    for (const call of calls) {
+      const options = call.options as { allowedTools?: string[] };
+      expect(options.allowedTools).toEqual(reviewTools());
+    }
+  });
+
+  it("agent1（ルール準拠チェック）にも read-only ツールを許可して呼び出す", async () => {
+    const calls: { prompt: unknown; options: unknown }[] = [];
+    const query = makeFakeQuery({ findings: [] }, { calls });
+    const ctx = baseCtx({
+      tier: "small",
+      assignments: [{ files: [{ path: "a.ts", rules: [] }] }, { files: [] }],
+    });
+    await llmReviewAgents(
+      { ctx, diffText: "diff", clusters: [], summary: null },
+      { query, readFile: () => null },
+    );
+    // agent1 + agent3（clusters 空で agent4 非起動）の2回。
+    expect(calls).toHaveLength(2);
+    for (const call of calls) {
+      const options = call.options as { allowedTools?: string[] };
+      expect(options.allowedTools).toEqual(reviewTools());
+    }
+  });
+
+  it("agent5（REVIEW.md 準拠チェック）にも read-only ツールを許可して呼び出す", async () => {
+    const calls: { prompt: unknown; options: unknown }[] = [];
+    const query = makeFakeQuery({ findings: [] }, { calls });
+    const ctx = baseCtx({
+      tier: "small",
+      assignments: [{ files: [] }, { files: [] }],
+    });
+    await llmReviewAgents(
+      { ctx, diffText: "diff", clusters: [], summary: null },
+      { query, readFile: (p) => (p === "REVIEW.md" ? "REVIEW 本文" : null) },
+    );
+    // agent3 + agent5 の2回（agent1/2/4 は非起動）。
+    expect(calls).toHaveLength(2);
+    const agent5Options = calls[1]?.options as { allowedTools?: string[] };
+    expect(agent5Options.allowedTools).toEqual(reviewTools());
+  });
+
+  it("全レビュー系エージェントに mcpServers(context7) が渡る", async () => {
+    const calls: { prompt: unknown; options: unknown }[] = [];
+    const query = makeFakeQuery({ findings: [] }, { calls });
+    const ctx = baseCtx({
+      tier: "small",
+      assignments: [{ files: [{ path: "a.ts", rules: [] }] }, { files: [] }],
+    });
+    await llmReviewAgents(
+      { ctx, diffText: "diff", clusters: [], summary: null },
+      { query, readFile: () => null },
+    );
+    for (const call of calls) {
+      const options = call.options as {
+        mcpServers?: Record<string, unknown>;
+      };
+      expect(options.mcpServers).toEqual({
+        context7: {
+          type: "stdio",
+          command: "npx",
+          args: ["-y", "@upstash/context7-mcp"],
+        },
+      });
+    }
+  });
+
+  it("CODE_REVIEW_DISABLE_CONTEXT7=1 のとき mcpServers を渡さない", async () => {
+    process.env.CODE_REVIEW_DISABLE_CONTEXT7 = "1";
+    try {
+      const calls: { prompt: unknown; options: unknown }[] = [];
+      const query = makeFakeQuery({ findings: [] }, { calls });
+      const ctx = baseCtx({
+        tier: "small",
+        assignments: [{ files: [{ path: "a.ts", rules: [] }] }, { files: [] }],
+      });
+      await llmReviewAgents(
+        { ctx, diffText: "diff", clusters: [], summary: null },
+        { query, readFile: () => null },
+      );
+      for (const call of calls) {
+        const options = call.options as {
+          mcpServers?: Record<string, unknown>;
+        };
+        expect(options.mcpServers).toBeUndefined();
+      }
+    } finally {
+      delete process.env.CODE_REVIEW_DISABLE_CONTEXT7;
+    }
   });
 
   it("REVIEW.md が存在すれば agent5 が起動する", async () => {
@@ -445,7 +532,42 @@ describe("llmVerifyIssues", () => {
     await llmVerifyIssues([baseIssue()], "diff", "summary", { query });
     expect(calls).toHaveLength(1);
     const options = calls[0]?.options as { allowedTools?: string[] };
-    expect(options.allowedTools).toEqual([...READ_ONLY_TOOLS]);
+    expect(options.allowedTools).toEqual(reviewTools());
+  });
+
+  it("mcpServers(context7) を渡す", async () => {
+    const calls: { prompt: unknown; options: unknown }[] = [];
+    const query = makeFakeQuery(
+      { verdict: "confirmed", reason: "根拠" },
+      { calls },
+    );
+    await llmVerifyIssues([baseIssue()], "diff", "summary", { query });
+    const options = calls[0]?.options as {
+      mcpServers?: Record<string, unknown>;
+    };
+    expect(options.mcpServers).toEqual({
+      context7: {
+        type: "stdio",
+        command: "npx",
+        args: ["-y", "@upstash/context7-mcp"],
+      },
+    });
+  });
+
+  it("CODE_REVIEW_ENABLE_WEB=1 のとき WebFetch/WebSearch も許可する", async () => {
+    process.env.CODE_REVIEW_ENABLE_WEB = "1";
+    try {
+      const calls: { prompt: unknown; options: unknown }[] = [];
+      const query = makeFakeQuery(
+        { verdict: "confirmed", reason: "根拠" },
+        { calls },
+      );
+      await llmVerifyIssues([baseIssue()], "diff", "summary", { query });
+      const options = calls[0]?.options as { allowedTools?: string[] };
+      expect(options.allowedTools).toEqual(reviewTools());
+    } finally {
+      delete process.env.CODE_REVIEW_ENABLE_WEB;
+    }
   });
 });
 

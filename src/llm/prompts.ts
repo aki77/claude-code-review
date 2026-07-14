@@ -1,11 +1,20 @@
 // LLM ステップ（step2/3/5/6）向けのプロンプトテンプレートと JSON Schema。
 //
 // 副作用なし・ファイル I/O なしの純関数のみを置く。
-// 大半のステップは allowedTools: []（ツール不可）のワンショットで、rules 本文・REVIEW.md・
-// contextHints ファイルなど「埋め込み済み文字列」を受け取ってテンプレートへ差し込むだけに
-// 徹する。ファイルの読み込みは steps.ts が行う。
-// 例外: 検証(step6)・agent4（クロスファイル参照）は read-only ツール（Read/Grep/Glob）の
-// 使用を前提にプロンプトを書く（steps.ts が allowedTools を明示的に渡す）。
+// 非レビュー系ステップ（step2 要約/クラスタ・step5 マージ・step9 コメント整形・
+// step4b アンカー再解決）は allowedTools: []（ツール不可）のワンショットで、rules 本文・
+// REVIEW.md・contextHints ファイルなど「埋め込み済み文字列」を受け取ってテンプレートへ
+// 差し込むだけに徹する。ファイルの読み込みは steps.ts が行う。
+// レビュー系（agent1〜5）と検証(step6)は精度優先の方針（tmp/open-code-review-調査.md）に
+// より read-only ツール（Read/Grep/Glob）＋ context7 MCP（既定 ON）の使用を前提にプロンプトを
+// 書く（steps.ts が reviewTools()/buildReviewMcpServers() を明示的に渡す）。
+import type { McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
+import { isEnvTruthy } from "../lib/env.ts";
+import {
+  buildReviewMcpServers,
+  CONTEXT7_SERVER_NAME,
+  isContext7Enabled,
+} from "../lib/mcp-config.ts";
 import type { Cluster, Issue, JSONSchema } from "../lib/types.ts";
 
 // ---- 誤検知除外リスト（元プラグイン shared/review-core.md 由来） -------------
@@ -40,10 +49,42 @@ export const MODEL_HEAVY = envModel(
   "opus",
 ); // agent3/4・bug 検証
 
-// read-only ツール一式（Read/Grep/Glob）。実コードに当たって判断する必要がある
-// ステップ（検証(step6)・agent4 のクロスファイル参照）だけがこれを allowedTools に渡す。
-// steps.ts の2箇所で同じ配列をベタ書きせず、ここを単一の情報源にする。
+// read-only ツール一式（Read/Grep/Glob）。全レビュー系エージェント（agent1〜5）＋
+// 検証(step6)に常時付与する（精度優先の方針。tmp/open-code-review-調査.md 参照）。
+// steps.ts の複数箇所で同じ配列をベタ書きせず、ここを単一の情報源にする。
 export const READ_ONLY_TOOLS = ["Read", "Grep", "Glob"] as const;
+
+// Web 参照ツール（WebFetch/WebSearch）。SDK/CLI のビルトインツールで、MCP 設定なしに
+// allowedTools へ名前を足すだけで使える。既定 OFF、CODE_REVIEW_ENABLE_WEB で opt-in。
+export const WEB_TOOLS = ["WebFetch", "WebSearch"] as const;
+
+// 全レビュー系ステップ（agent1〜5＋検証step6）共通の allowedTools 合成ヘルパ。
+// READ_ONLY_TOOLS を基点に、context7 MCP（"mcp__<server>" 形式のサーバーレベル
+// ワイルドカードで個別ツール列挙なしに全ツールを許可できる）と、
+// CODE_REVIEW_ENABLE_WEB が truthy なら WEB_TOOLS を足す。
+export function reviewTools(): string[] {
+  const tools: string[] = [...READ_ONLY_TOOLS];
+  if (isContext7Enabled()) {
+    tools.push(`mcp__${CONTEXT7_SERVER_NAME}`);
+  }
+  if (isEnvTruthy(process.env.CODE_REVIEW_ENABLE_WEB)) {
+    tools.push(...WEB_TOOLS);
+  }
+  return tools;
+}
+
+// 全レビュー系ステップ（agent1〜5＋検証step6）共通の runStructured オプション
+// （allowedTools/mcpServers）。steps.ts の llmReviewAgents/llmVerifyIssues の
+// 双方で同じ組み立てが必要なため、ここを単一の情報源にする。
+export function buildReviewOpts(): {
+  allowedTools: string[];
+  mcpServers: Record<string, McpServerConfig> | undefined;
+} {
+  return {
+    allowedTools: reviewTools(),
+    mcpServers: buildReviewMcpServers(),
+  };
+}
 
 // ---- JSON Schema 定数 --------------------------------------------------------
 
@@ -184,6 +225,33 @@ const EXISTING_CODE_INSTRUCTION =
   "existingCode には diff に実在する連続コード片を逐語コピーしてください（行番号は書かない）。" +
   "追加行と削除行を1つのアンカーに混在させないこと。";
 
+// 全レビュー系エージェント（agent1〜5＋検証step6）共通の外部参照ツール案内文言。
+// agent1/2/3/5 は read-only ツール（Read/Grep/Glob）案内込み、agent4
+// （clusterAgentSystem）は「クロスファイル整合性」文脈に合わせた独自文言を既に持つため
+// includeReadTools: false で read-only ツール部分のみ省く（重複させない）。
+// context7 MCP・Web（WebFetch/WebSearch）は有効なときだけ追記する
+// （使えないツールへの言及は無駄な試行を誘発するため出し分ける）。
+function toolUsageInstruction({
+  includeReadTools,
+}: {
+  includeReadTools: boolean;
+}): string {
+  const readToolsPart = includeReadTools
+    ? "diff の内容に加え、呼び出し元・型定義・関連ファイルなど diff 外のコードも " +
+      "Read/Grep/Glob ツールで確認してよい。それでも確信が持てない指摘は行わないこと。"
+    : "";
+  const webEnabled = isEnvTruthy(process.env.CODE_REVIEW_ENABLE_WEB);
+  const parts: string[] = [];
+  if (isContext7Enabled())
+    parts.push("context7 で依存ライブラリの最新の実仕様");
+  if (webEnabled) parts.push("WebFetch/WebSearch で公式ドキュメント");
+  const externalReferencePart =
+    parts.length > 0
+      ? `\nライブラリ API の仕様が疑わしい場合は、${parts.join("・")}を確認してよい。`
+      : "";
+  return readToolsPart + externalReferencePart;
+}
+
 function joinFileTexts(
   files: { path: string; content: string | null }[],
 ): string {
@@ -244,7 +312,7 @@ export function ruleAgentSystem(): string {
     "各指摘は category を必ず rule-violation にし、ruleRefs に適用したルールファイルのパスを" +
     "非空配列で含めてください。\n" +
     `${EXISTING_CODE_INSTRUCTION}\n` +
-    "確信が持てない指摘は行わないこと。"
+    toolUsageInstruction({ includeReadTools: true })
   );
 }
 
@@ -277,17 +345,18 @@ export function ruleAgentUser({
   );
 }
 
-// ---- agent3: バグ検出（diff 限定） -------------------------------------------
+// ---- agent3: バグ検出 ---------------------------------------------------------
+// 精度優先の方針転換（tmp/open-code-review-調査.md）により、以前の「diff 限定」設計を
+// 緩め、Read/Grep/Glob での diff 外参照を許可する（toolUsageInstruction()）。
 
 export function bugAgentSystem(): string {
   return (
     "あなたはバグ検出を専門とするレビューエージェントです。明らかなバグを探してください。\n" +
-    "diff の内容のみに注目し、追加コンテキストの参照は行わないこと。git diff 外のコンテキストを" +
-    "参照しないと判断できない指摘は行わないこと。\n" +
     "重大なバグのみを指摘し、些細な指摘や誤検知の可能性が高いものは無視してください。\n" +
     "category は bug / security / performance のいずれか最も当てはまるものを選んでください" +
     "（rule-violation は使わないこと）。\n" +
-    EXISTING_CODE_INSTRUCTION
+    `${EXISTING_CODE_INSTRUCTION}\n` +
+    toolUsageInstruction({ includeReadTools: true })
   );
 }
 
@@ -322,7 +391,8 @@ export function clusterAgentSystem(): string {
     "自クラスタの changedFiles に導入された問題のみを指摘し、他クラスタの変更は担当外として" +
     "無視してください。\n" +
     "category は bug / security / performance のいずれか（rule-violation は使わないこと）。\n" +
-    EXISTING_CODE_INSTRUCTION
+    EXISTING_CODE_INSTRUCTION +
+    toolUsageInstruction({ includeReadTools: false })
   );
 }
 
@@ -363,7 +433,8 @@ export function reviewMdAgentSystem(): string {
     "主観的な提案や改善案。実際に問題かどうか確信が持てない場合は指摘しないこと。\n" +
     "category は必ず rule-violation にし、ruleRefs に REVIEW.md（および参照した観点ファイル）の" +
     "パスを非空配列で含めてください。\n" +
-    EXISTING_CODE_INSTRUCTION
+    `${EXISTING_CODE_INSTRUCTION}\n` +
+    toolUsageInstruction({ includeReadTools: true })
   );
 }
 
@@ -421,7 +492,8 @@ export function verifySystem(): string {
     "検証してください。\n" +
     `${FALSE_POSITIVE_EXCLUSIONS}\n\n` +
     "実際の問題だと高い確度で確認できたら confirmed、そうでなければ rejected を返してください。" +
-    "reason には判定の根拠を1〜2文で書いてください。"
+    "reason には判定の根拠を1〜2文で書いてください。" +
+    toolUsageInstruction({ includeReadTools: false })
   );
 }
 

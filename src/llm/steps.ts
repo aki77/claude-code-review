@@ -5,7 +5,10 @@
 // 設計原則: LLM は意味判断のみ。位置解決・検証・フィルタ適用・
 // 構造転写・グルーピング・並列制御はすべてコードで決定論的に行う（Promise.all で並列化）。
 import { readFileSync } from "node:fs";
-import type { ModelUsage } from "@anthropic-ai/claude-agent-sdk";
+import type {
+  McpServerConfig,
+  ModelUsage,
+} from "@anthropic-ai/claude-agent-sdk";
 import type { ProgressReporter } from "../lib/progress.ts";
 import type {
   Assignment,
@@ -29,6 +32,7 @@ import {
 import {
   bugAgentSystem,
   bugAgentUser,
+  buildReviewOpts,
   COMMENT_BODIES_SCHEMA,
   clusterAgentSystem,
   clusterAgentUser,
@@ -40,7 +44,6 @@ import {
   MODEL_LIGHT,
   mergeTextSystem,
   mergeTextUser,
-  READ_ONLY_TOOLS,
   RETRY_ANCHOR_SCHEMA,
   retryAnchorSystem,
   retryAnchorUser,
@@ -118,10 +121,13 @@ async function runFindingsAgent(
   user: string,
   model: string,
   queryFn: QueryFn | undefined,
-  allowedTools?: string[],
+  reviewOpts: {
+    allowedTools?: string[];
+    mcpServers?: Record<string, McpServerConfig>;
+  } = {},
 ): Promise<RunStructuredResult<unknown[]>> {
   const result = await runStructured<{ findings: unknown[] }>(
-    { system, user, model, schema: FINDINGS_SCHEMA, allowedTools },
+    { system, user, model, schema: FINDINGS_SCHEMA, ...reviewOpts },
     { query: queryFn },
   );
   return { ...result, data: result.data.findings };
@@ -226,6 +232,8 @@ export async function llmReviewAgents(
   const debug = deps.debug;
   const costSink = deps.costSink;
   const progress = deps.progress;
+  // 全レビュー系エージェント（agent1〜5）共通の allowedTools/mcpServers。
+  const reviewOpts = buildReviewOpts();
 
   const tasks: Promise<unknown[]>[] = [];
 
@@ -250,6 +258,7 @@ export async function llmReviewAgents(
             ruleAgentUser({ agent, assignment, ruleTexts, summary, diffText }),
             MODEL_LIGHT,
             queryFn,
+            reviewOpts,
           );
         },
         [],
@@ -260,7 +269,7 @@ export async function llmReviewAgents(
     );
   }
 
-  // agent3: バグ検出（diff 限定）。tier によらず常に起動。
+  // agent3: バグ検出。tier によらず常に起動。
   tasks.push(
     runAgentSafe(
       "agent3",
@@ -270,6 +279,7 @@ export async function llmReviewAgents(
           bugAgentUser({ summary, diffText }),
           MODEL_HEAVY,
           queryFn,
+          reviewOpts,
         ),
       [],
       debug,
@@ -301,7 +311,7 @@ export async function llmReviewAgents(
             }),
             MODEL_HEAVY,
             queryFn,
-            [...READ_ONLY_TOOLS],
+            reviewOpts,
           );
         },
         [],
@@ -324,6 +334,7 @@ export async function llmReviewAgents(
             reviewMdAgentUser({ reviewMd, summary, diffText }),
             MODEL_LIGHT,
             queryFn,
+            reviewOpts,
           ),
         [],
         debug,
@@ -470,6 +481,8 @@ export async function llmVerifyIssues(
   const debug = deps.debug;
   const costSink = deps.costSink;
   const progress = deps.progress;
+  // レビュー系ステップ共通の allowedTools/mcpServers（agent1〜5 と同一方針。steps.ts 冒頭参照）。
+  const reviewOpts = buildReviewOpts();
 
   progress?.startStep("検証", issues.length);
   const results = await Promise.all(
@@ -494,8 +507,8 @@ export async function llmVerifyIssues(
               model,
               schema: VERDICT_SCHEMA,
               // 検証は「実際に問題か」をコードに当たって判断する必要があるため、
-              // read-only ツールを許可する（書き込み系は一切許可しない）。
-              allowedTools: [...READ_ONLY_TOOLS],
+              // read-only ツール（＋opt-in Web）を許可する（書き込み系は一切許可しない）。
+              ...reviewOpts,
             },
             { query: queryFn },
           );

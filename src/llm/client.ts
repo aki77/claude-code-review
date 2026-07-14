@@ -11,12 +11,14 @@
 // system prompt は claude_code プリセットを土台にし、JSON 強制指示を含むレビュー本文は
 // append で末尾に載せる。
 //
-// ツール方針: allowedTools は既定 []（LLM はコードを一切参照しないワンショット）。
-// read-only ツール（Read/Grep/Glob）は持たせてよい方針のため、実コードに当たって
-// 判断すべきステップ（検証(step6)・agent4 のクロスファイル参照）だけが opts.allowedTools
-// で明示的に許可を渡す。write 系ツールは一切許可しない（作業ツリーは変更しない）。
+// ツール方針: 非レビュー系ステップ（step2/5/9/4b）は allowedTools 省略時の既定 []
+// （LLM はコードを一切参照しないワンショット）。レビュー系ステップ（agent1〜5＋検証step6）は
+// reviewTools()（src/llm/prompts.ts）で read-only ツール（Read/Grep/Glob）＋ context7 MCP
+// （既定 ON、CODE_REVIEW_DISABLE_CONTEXT7 で無効化）を opts.allowedTools 経由で常時付与する。
+// write 系ツールは一切許可しない（作業ツリーは変更しない）。
 
 import type {
+  McpServerConfig,
   ModelUsage,
   NonNullableUsage,
 } from "@anthropic-ai/claude-agent-sdk";
@@ -28,10 +30,13 @@ export interface RunStructuredOpts {
   user: string;
   model?: string;
   schema?: JSONSchema;
-  // read-only ツール（Read/Grep/Glob 等）の許可リスト。省略時は [] を維持し、
-  // 他ステップの決定論性（LLM はコード非参照のワンショット）を崩さない。
-  // 検証(step6)・agent4 など、実コードに当たって判断すべきステップのみ明示的に渡す。
+  // read-only ツール（Read/Grep/Glob 等）＋ context7 MCP の許可リスト。省略時は []
+  // を維持し、非レビュー系ステップの決定論性（LLM はコード非参照のワンショット）を崩さない。
+  // レビュー系ステップ（agent1〜5＋検証step6）のみ reviewTools() の結果を明示的に渡す。
   allowedTools?: string[];
+  // MCP サーバ設定（context7 など）。レビュー系ステップに context7 を渡す。
+  // CODE_REVIEW_DISABLE_CONTEXT7 で口を閉じられる（buildMcpServers が undefined を返す）。
+  mcpServers?: Record<string, McpServerConfig>;
 }
 
 export interface RunStructuredResult<T> {
@@ -81,6 +86,8 @@ export async function runStructured<T>(
   const queryFn = deps?.query ?? query;
   const options: Parameters<QueryFn>[0]["options"] = {
     allowedTools: opts.allowedTools ?? [],
+    // settingSources: [] を維持する。CLI 設定経由の MCP は読み込まず、本 CLI が
+    // opts.mcpServers で明示的に組み立てた MCP 設定だけを渡す（副作用の口を最小化）。
     settingSources: [],
     permissionMode: "default",
     systemPrompt: {
@@ -92,6 +99,7 @@ export async function runStructured<T>(
     ...(opts.schema !== undefined
       ? { outputFormat: { type: "json_schema" as const, schema: opts.schema } }
       : {}),
+    ...(opts.mcpServers !== undefined ? { mcpServers: opts.mcpServers } : {}),
   };
 
   const result = await runQueryUntilResult(queryFn, opts.user, options);

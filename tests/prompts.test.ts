@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { CONTEXT7_SERVER_NAME } from "../src/lib/mcp-config.ts";
 import {
   bugAgentSystem,
   bugAgentUser,
@@ -11,11 +12,13 @@ import {
   MODEL_LIGHT,
   mergeTextSystem,
   mergeTextUser,
+  READ_ONLY_TOOLS,
   RETRY_ANCHOR_SCHEMA,
   retryAnchorSystem,
   retryAnchorUser,
   reviewMdAgentSystem,
   reviewMdAgentUser,
+  reviewTools,
   ruleAgentSystem,
   ruleAgentUser,
   SUMMARY_CLUSTERS_SCHEMA,
@@ -25,12 +28,49 @@ import {
   VERDICT_SCHEMA,
   verifySystem,
   verifyUser,
+  WEB_TOOLS,
 } from "../src/llm/prompts.ts";
 
 describe("モデルエイリアス定数", () => {
   it("既定値: CODE_REVIEW_MODEL_LIGHT/_HEAVY が未設定なら MODEL_LIGHT は sonnet、MODEL_HEAVY は opus", () => {
     expect(MODEL_LIGHT).toBe("sonnet");
     expect(MODEL_HEAVY).toBe("opus");
+  });
+});
+
+describe("reviewTools", () => {
+  afterEach(() => {
+    delete process.env.CODE_REVIEW_ENABLE_WEB;
+    delete process.env.CODE_REVIEW_DISABLE_CONTEXT7;
+  });
+
+  it("既定（環境変数未設定）は READ_ONLY_TOOLS + context7 の mcp__ エントリ", () => {
+    expect(reviewTools()).toEqual([
+      ...READ_ONLY_TOOLS,
+      `mcp__${CONTEXT7_SERVER_NAME}`,
+    ]);
+  });
+
+  it("CODE_REVIEW_DISABLE_CONTEXT7=1 のとき context7 の mcp__ エントリを含めない", () => {
+    process.env.CODE_REVIEW_DISABLE_CONTEXT7 = "1";
+    expect(reviewTools()).toEqual([...READ_ONLY_TOOLS]);
+  });
+
+  it("CODE_REVIEW_ENABLE_WEB=1 のとき WEB_TOOLS を追加する", () => {
+    process.env.CODE_REVIEW_ENABLE_WEB = "1";
+    expect(reviewTools()).toEqual([
+      ...READ_ONLY_TOOLS,
+      `mcp__${CONTEXT7_SERVER_NAME}`,
+      ...WEB_TOOLS,
+    ]);
+  });
+
+  it("CODE_REVIEW_ENABLE_WEB=0 のとき WEB_TOOLS を追加しない", () => {
+    process.env.CODE_REVIEW_ENABLE_WEB = "0";
+    expect(reviewTools()).toEqual([
+      ...READ_ONLY_TOOLS,
+      `mcp__${CONTEXT7_SERVER_NAME}`,
+    ]);
   });
 });
 
@@ -116,12 +156,16 @@ describe("ruleAgentSystem/User", () => {
     });
     expect(user).toContain("参照コンテキストなし");
   });
+
+  it("Read/Grep/Glob で diff 外コードも確認してよい旨を明記する（精度優先の方針）", () => {
+    expect(ruleAgentSystem()).toContain("Read/Grep/Glob");
+  });
 });
 
 describe("bugAgentSystem/User", () => {
-  it("diff 限定・追加コンテキスト参照禁止を明記する", () => {
+  it("read-only ツールで diff 外コードも確認してよい旨を明記する（精度優先の方針転換）", () => {
     const sys = bugAgentSystem();
-    expect(sys).toContain("追加コンテキスト");
+    expect(sys).toContain("Read/Grep/Glob");
     const user = bugAgentUser({ summary: "サマリ", diffText: "diff-text" });
     expect(user).toContain("diff-text");
   });
@@ -175,6 +219,10 @@ describe("reviewMdAgentSystem/User", () => {
       diffText: "diff",
     });
     expect(user).toContain("REVIEW 本文");
+  });
+
+  it("Read/Grep/Glob で diff 外コードも確認してよい旨を明記する（精度優先の方針）", () => {
+    expect(reviewMdAgentSystem()).toContain("Read/Grep/Glob");
   });
 });
 
@@ -259,6 +307,36 @@ describe("verifySystem/User", () => {
     expect(sys).toContain(FALSE_POSITIVE_EXCLUSIONS);
     expect(sys).toContain("既存");
     expect(sys).toContain("リンタ");
+  });
+});
+
+describe("externalReferenceInstruction（context7/Web の出し分け, verifySystem 経由で検証）", () => {
+  afterEach(() => {
+    delete process.env.CODE_REVIEW_DISABLE_CONTEXT7;
+    delete process.env.CODE_REVIEW_ENABLE_WEB;
+  });
+
+  it("既定（context7 有効・Web 無効）は context7 のみ言及する", () => {
+    const sys = verifySystem();
+    expect(sys).toContain("context7");
+    expect(sys).not.toContain("WebFetch");
+  });
+
+  it("CODE_REVIEW_DISABLE_CONTEXT7=1 のとき context7 に言及しない", () => {
+    process.env.CODE_REVIEW_DISABLE_CONTEXT7 = "1";
+    expect(verifySystem()).not.toContain("context7");
+  });
+
+  it("CODE_REVIEW_ENABLE_WEB=1 のとき WebFetch/WebSearch に言及する", () => {
+    process.env.CODE_REVIEW_ENABLE_WEB = "1";
+    expect(verifySystem()).toContain("WebFetch/WebSearch");
+  });
+
+  it("context7・Web とも無効なとき何も言及しない", () => {
+    process.env.CODE_REVIEW_DISABLE_CONTEXT7 = "1";
+    const sys = verifySystem();
+    expect(sys).not.toContain("context7");
+    expect(sys).not.toContain("WebFetch");
   });
 });
 
