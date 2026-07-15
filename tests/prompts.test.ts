@@ -32,9 +32,9 @@ import {
 } from "../src/llm/prompts.ts";
 
 describe("モデルエイリアス定数", () => {
-  it("既定値: CODE_REVIEW_MODEL_LIGHT/_HEAVY が未設定なら MODEL_LIGHT は sonnet、MODEL_HEAVY は opus", () => {
+  it("既定値: CODE_REVIEW_MODEL_LIGHT/_HEAVY が未設定なら MODEL_LIGHT・MODEL_HEAVY ともに sonnet", () => {
     expect(MODEL_LIGHT).toBe("sonnet");
-    expect(MODEL_HEAVY).toBe("opus");
+    expect(MODEL_HEAVY).toBe("sonnet");
   });
 });
 

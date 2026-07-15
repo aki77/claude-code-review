@@ -46,7 +46,7 @@ export const MODEL_LIGHT = envModel(
 ); // agent1/2/5・rule 検証
 export const MODEL_HEAVY = envModel(
   process.env.CODE_REVIEW_MODEL_HEAVY,
-  "opus",
+  "sonnet",
 ); // agent3/4・bug 検証
 
 // read-only ツール一式（Read/Grep/Glob）。全レビュー系エージェント（agent1〜5）＋
