@@ -21,6 +21,7 @@ import {
   resolveAnchor,
   splitAndNormalize,
 } from "./diff-anchor.ts";
+import { looksLikeStuffedJson } from "./llm-output-guard.ts";
 import type {
   Category,
   Ctx,
@@ -98,6 +99,12 @@ function validateFinding(f: unknown): string[] {
     const v = rec[key];
     if (typeof v !== "string" || v.trim() === "") {
       errors.push(`${key} は非空文字列である必要がある`);
+      continue;
+    }
+    if ((key === "title" || key === "body") && looksLikeStuffedJson(v)) {
+      errors.push(
+        `${key} に title/body を含む JSON 構造が丸ごと格納されている疑いがある（LLM出力異常）`,
+      );
     }
   }
   const agent = rec.agent as number;

@@ -7,6 +7,7 @@
 // ruleRefs（和集合）は**すべてスクリプトが機械転写**し、LLM を経由させない（転記ミス防止）。
 // category/severity は process-findings のグループ集約規則で確定済みの値をそのままコピーする
 // （kind と同じ扱い。LLM の統合文章 title/body とは独立）。
+import { stuffedJsonFieldNames } from "./llm-output-guard.ts";
 import type { FindingsDoc, Issue, IssuesDoc, MergeText } from "./types.ts";
 
 // findingsDoc（FINDINGS の中身）と mergeTexts（LLM 統合文章配列）から ISSUES を組み立てる純粋関数。
@@ -60,6 +61,13 @@ export function mergeFindings(
     ) {
       throw new Error(
         `groupId=${groupId} の統合文章は title/body（非空文字列）が必要です`,
+      );
+    }
+    const stuffedFields = stuffedJsonFieldNames(title, body);
+    if (stuffedFields.length > 0) {
+      throw new Error(
+        `groupId=${groupId} の統合文章の ${stuffedFields.join("/")} に ` +
+          "title/body を含む JSON 構造が丸ごと格納されている疑いがある（LLM出力異常）",
       );
     }
     textByGroup.set(groupId, { groupId, title, body });

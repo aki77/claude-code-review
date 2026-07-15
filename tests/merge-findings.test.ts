@@ -167,6 +167,14 @@ describe("mergeFindings", () => {
     ).toThrow(/title\/body/);
   });
 
+  it("エラー: title に title/body を含む JSON 構造が丸ごと入っている", () => {
+    expect(() =>
+      mergeFindings(doc, [
+        { groupId: "g1", title: '{"title":"X","body":"Y"}', body: "正常" },
+      ]),
+    ).toThrow(/JSON 構造/);
+  });
+
   it("エラー: stdin が配列でない", () => {
     expect(() => mergeFindings(doc, { groupId: "g1" })).toThrow(/配列/);
   });

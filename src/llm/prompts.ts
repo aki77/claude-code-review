@@ -213,12 +213,21 @@ export const COMMENT_BODIES_SCHEMA: JSONSchema = {
 // 埋め込みが空（ファイル欠落）の場合に使う。存在しないファイルを LLM に想像させない。
 const NO_CONTEXT_NOTE = "（参照コンテキストなし）";
 
+// title/body を別フィールドで出力させ、どちらにも JSON 構造を詰め込ませない共通文言。
+// finding 出力（FINDINGS_OUTPUT_INSTRUCTION）と統合文章（mergeTextUser）の両方で使う。
+// looksLikeStuffedJson（llm-output-guard.ts）が title/body を対称に検知する実装と揃える
+// ため、この 1 箇所を単一の情報源にして両ステップの文言を同期させる。
+const TITLE_BODY_NO_STUFFING_INSTRUCTION =
+  "title と body は必ず別々の文字列で出力し、title・body いずれのフィールドにも" +
+  "JSON 構造（title/body を含むオブジェクトなど）を入れ子にして詰め込まないこと。";
+
 // FINDINGS_SCHEMA が { findings: Finding[] } でラップされている（Anthropic API の
 // json_schema 出力はトップレベルが object である制約のため）ことを全レビューエージェントの
 // user prompt 末尾で明示する共通文言。
 const FINDINGS_OUTPUT_INSTRUCTION =
   '出力は { "findings": [...] } の形（findings キー配下に finding 配列）にすること。' +
-  "指摘がなければ findings を空配列にすること。";
+  "指摘がなければ findings を空配列にすること。" +
+  TITLE_BODY_NO_STUFFING_INSTRUCTION;
 
 // 全レビューエージェント（agent1/2/3/4/5）の system prompt 共通の existingCode 指示。
 // 行番号は resolveAnchor（diff-anchor.ts）が機械的に確定するため LLM には書かせず、
@@ -480,7 +489,11 @@ export function mergeTextUser({
         `### 指摘${i + 1}\ntitle: ${m.title ?? ""}\nbody: ${m.body ?? ""}`,
     )
     .join("\n\n");
-  return `以下の複数の指摘を1件に統合し、title と body を返してください。\n\n${list}`;
+  return (
+    "以下の複数の指摘を1件に統合し、title と body を返してください。" +
+    `${TITLE_BODY_NO_STUFFING_INSTRUCTION}\n\n` +
+    list
+  );
 }
 
 // ---- step6: 検証 --------------------------------------------------------------

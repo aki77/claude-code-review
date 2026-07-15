@@ -306,4 +306,24 @@ describe("processFindings", () => {
   it("非配列 stdin は throw する", () => {
     expect(() => run({ not: "array" })).toThrow(/配列/);
   });
+
+  it("スキーマ検証: title に title/body を含む JSON 構造が丸ごと入っていると invalid", () => {
+    const { findings, stats } = run([
+      bug({ title: '{"title":"X","body":"Y"}' }),
+    ]);
+    expect(findings[0]!.status).toBe("invalid");
+    expect(findings[0]!.errors!.join()).toMatch(/JSON 構造/);
+    expect(stats.invalid).toBe(1);
+  });
+
+  it("スキーマ検証: body に title/body を含む JSON 構造が丸ごと入っていると invalid", () => {
+    const { findings } = run([bug({ body: '{"title":"X","body":"Y"}' })]);
+    expect(findings[0]!.status).toBe("invalid");
+    expect(findings[0]!.errors!.join()).toMatch(/JSON 構造/);
+  });
+
+  it("誤検知回避: 前後に自然文が付く { を含む title は active のまま", () => {
+    const { findings } = run([bug({ title: "{ foo } を含むタイトル" })]);
+    expect(findings[0]!.status).toBe("active");
+  });
 });
