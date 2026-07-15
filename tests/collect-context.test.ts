@@ -4,6 +4,7 @@ import {
   buildExcludeArgs,
   classifyFiles,
   classifyTier,
+  collectContext,
   fileMatchesPatterns,
   parseCheckAttrOutput,
   parseFrontmatterPaths,
@@ -11,6 +12,7 @@ import {
   resolvePrBaseRange,
   splitOversized,
 } from "../src/lib/collect-context.ts";
+import type { ExecResult } from "../src/lib/exec.ts";
 import type { Rule } from "../src/lib/types.ts";
 
 describe("fileMatchesPatterns", () => {
@@ -487,5 +489,183 @@ describe("Rule 型", () => {
   it("paths=null は全ファイル適用を表す", () => {
     const rule: Rule = { path: ".claude/rules/foo.md", paths: null };
     expect(rule.paths).toBeNull();
+  });
+});
+
+// collectContext の workspace モード（range 未指定時のデフォルト）を検証する。
+// 一時 index パスは実在しない架空パスを返す（existsSync が false になり copyFileSync は
+// スキップされる。dispose の rmSync も force:true のため実ファイルには一切触れない）。
+describe("collectContext: workspace モード", () => {
+  type Stub = (
+    command: string,
+    args: string[],
+    options?: { env?: NodeJS.ProcessEnv },
+  ) => Promise<ExecResult>;
+
+  // 呼び出しを記録しつつ、シナリオごとの応答テーブルで分岐するフェイク exec を作る。
+  function makeExec(opts: {
+    headExists?: boolean;
+    untracked?: string[];
+    trackedFiles?: string[];
+    numstat?: string;
+  }): { exec: Stub; calls: { args: string[] }[] } {
+    const calls: { args: string[] }[] = [];
+    const exec: Stub = async (command, args) => {
+      calls.push({ args });
+      if (command !== "git") return { stdout: "", stderr: "", code: 0 };
+      if (args[0] === "rev-parse" && args.includes("--git-path")) {
+        return {
+          stdout: "/tmp/fake-repo-does-not-exist/.git/index\n",
+          stderr: "",
+          code: 0,
+        };
+      }
+      if (args[0] === "rev-parse" && args.includes("--verify")) {
+        return (opts.headExists ?? true)
+          ? { stdout: "head000\n", stderr: "", code: 0 }
+          : { stdout: "", stderr: "fatal: HEAD 不在", code: 128 };
+      }
+      if (args[0] === "ls-files" && args.includes("--others")) {
+        const untracked = opts.untracked ?? [];
+        return {
+          stdout: untracked.length ? `${untracked.join("\0")}\0` : "",
+          stderr: "",
+          code: 0,
+        };
+      }
+      if (args[0] === "add" && args.includes("-N")) {
+        return { stdout: "", stderr: "", code: 0 };
+      }
+      if (
+        args[0] === "diff" &&
+        args.includes("--name-only") &&
+        args.includes("--find-renames")
+      ) {
+        return {
+          stdout: `${(opts.trackedFiles ?? []).join("\n")}\n`,
+          stderr: "",
+          code: 0,
+        };
+      }
+      if (args[0] === "check-attr") {
+        return { stdout: "", stderr: "", code: 0 };
+      }
+      if (args[0] === "diff" && args.includes("--numstat")) {
+        return { stdout: opts.numstat ?? "", stderr: "", code: 0 };
+      }
+      return { stdout: "", stderr: "", code: 0 };
+    };
+    return { exec, calls };
+  }
+
+  it("staged のみ: tracked ファイルが changedFiles に載り source=workspace", async () => {
+    const { exec } = makeExec({
+      trackedFiles: ["staged.ts"],
+      numstat: "3\t0\tstaged.ts\n",
+    });
+    const { context, dispose } = await collectContext(
+      { mode: "range" },
+      { exec },
+    );
+    expect(context.source).toBe("workspace");
+    expect(context.changedFiles).toEqual(["staged.ts"]);
+    expect(context.diffArgs).toEqual(["HEAD"]);
+    expect(context.diffEnv?.GIT_INDEX_FILE).toBeDefined();
+    expect(context.range).toBeUndefined();
+    dispose();
+  });
+
+  it("unstaged のみ / staged+unstaged 混在も同じ tracked 列挙経路にまとまる", async () => {
+    const { exec } = makeExec({
+      trackedFiles: ["staged.ts", "unstaged.ts"],
+      numstat: "1\t1\tstaged.ts\n2\t0\tunstaged.ts\n",
+    });
+    const { context, dispose } = await collectContext(
+      { mode: "range" },
+      { exec },
+    );
+    expect(context.changedFiles.sort()).toEqual(["staged.ts", "unstaged.ts"]);
+    dispose();
+  });
+
+  it("untracked のみ: ls-files の結果が changedFiles に合流する", async () => {
+    const { exec, calls } = makeExec({
+      untracked: ["new.ts"],
+      trackedFiles: [],
+      numstat: "5\t0\tnew.ts\n",
+    });
+    const { context, dispose } = await collectContext(
+      { mode: "range" },
+      { exec },
+    );
+    expect(context.changedFiles).toEqual(["new.ts"]);
+    const addCall = calls.find((c) => c.args[0] === "add");
+    expect(addCall?.args).toEqual(["add", "-N", "--", "new.ts"]);
+    dispose();
+  });
+
+  it("staged+unstaged+untracked 全部入り: 3種すべてが changedFiles に含まれる", async () => {
+    const { exec } = makeExec({
+      untracked: ["new.ts"],
+      trackedFiles: ["staged.ts", "unstaged.ts"],
+      numstat: "1\t0\tstaged.ts\n2\t1\tunstaged.ts\n3\t0\tnew.ts\n",
+    });
+    const { context, dispose } = await collectContext(
+      { mode: "range" },
+      { exec },
+    );
+    expect(context.changedFiles.sort()).toEqual([
+      "new.ts",
+      "staged.ts",
+      "unstaged.ts",
+    ]);
+    dispose();
+  });
+
+  it("空リポ（HEAD 不在）: baseRef が空ツリー SHA になり diffArgs に反映される", async () => {
+    const { exec } = makeExec({
+      headExists: false,
+      untracked: ["new.ts"],
+      trackedFiles: [],
+      numstat: "1\t0\tnew.ts\n",
+    });
+    const { context, dispose } = await collectContext(
+      { mode: "range" },
+      { exec },
+    );
+    expect(context.diffArgs).toEqual([
+      "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+    ]);
+    expect(context.changedFiles).toEqual(["new.ts"]);
+    dispose();
+  });
+
+  it("--range 明示指定時は従来どおり range モード（source=range）", async () => {
+    const calls: { args: string[] }[] = [];
+    const exec: Stub = async (command, args) => {
+      calls.push({ args });
+      if (command !== "git") return { stdout: "", stderr: "", code: 0 };
+      if (args[0] === "diff" && args.includes("--name-only")) {
+        return { stdout: "a.ts\n", stderr: "", code: 0 };
+      }
+      if (args[0] === "check-attr") {
+        return { stdout: "", stderr: "", code: 0 };
+      }
+      if (args[0] === "diff" && args.includes("--numstat")) {
+        return { stdout: "1\t0\ta.ts\n", stderr: "", code: 0 };
+      }
+      return { stdout: "", stderr: "", code: 0 };
+    };
+    const { context, dispose } = await collectContext(
+      { mode: "range", range: "main" },
+      { exec },
+    );
+    expect(context.source).toBe("range");
+    expect(context.range).toBe("main...HEAD");
+    expect(context.diffEnv).toBeUndefined();
+    // workspace-index 系のコマンド（rev-parse --git-path / ls-files 等）は呼ばれない。
+    expect(calls.some((c) => c.args.includes("--git-path"))).toBe(false);
+    expect(calls.some((c) => c.args[0] === "ls-files")).toBe(false);
+    dispose();
   });
 });

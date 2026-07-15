@@ -197,7 +197,7 @@ export interface FinalDoc {
 // ---- collect-context 関連 ---------------------------------------------------
 
 export type Tier = "small" | "normal";
-export type ContextSource = "pr" | "range" | "staged";
+export type ContextSource = "pr" | "range" | "workspace";
 
 export interface Metrics {
   totalFiles: number;
@@ -222,6 +222,8 @@ export interface Context {
   tier: Tier;
   diffArgs: string[];
   range?: string;
+  /** workspace モードのときのみ設定。diff 取得・アンカー再解決の exec に渡す env override。 */
+  diffEnv?: Record<string, string>;
 }
 
 /** collectRules / rulesForFile が扱うルール定義。paths=null は全ファイル適用。 */

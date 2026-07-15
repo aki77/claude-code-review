@@ -30,6 +30,7 @@ import {
   tierReducedClusters,
   validateClusters,
 } from "./lib/validate-clusters.ts";
+import { mergeEnv } from "./lib/workspace-index.ts";
 import type { QueryFn } from "./llm/client.ts";
 import {
   type CostSink,
@@ -131,10 +132,13 @@ async function runReviewCore(
     abortController,
   };
 
-  // diff 取得（統一 diff。以降の全ステップがこの diff を使う）。
+  // diff 取得（統一 diff。以降の全ステップがこの diff を使う）。workspace モードでは
+  // ctx.diffEnv（一時 GIT_INDEX_FILE）を process.env とマージして渡す
+  // （GIT_INDEX_FILE だけの env にすると PATH 等が消えるため）。
   progress.startStep("diff 取得");
   const diffResult = await exec("git", buildDiffArgs(ctx), {
     maxBuffer: DIFF_MAX_BUFFER,
+    env: ctx.diffEnv ? mergeEnv(ctx.diffEnv) : undefined,
   });
   const diffText = diffResult.stdout;
   progress.succeedStep();
@@ -295,17 +299,20 @@ export async function runLocalReview(
   });
 
   let totalCostUsd = 0;
+  let dispose: () => void = () => {};
   try {
     progress.startStep("コンテキスト収集");
-    const ctx = await collectContext(opts, { exec: boundExec });
+    const collected = await collectContext(opts, { exec: boundExec });
+    const { context: ctx } = collected;
+    dispose = collected.dispose;
     debug("ctx", ctx);
     progress.succeedStep();
 
-    // 著者意図情報。staged はコミットが無いため diff のみの固定文言、それ以外（range）は
+    // 著者意図情報。workspace はコミットが無いため diff のみの固定文言、それ以外（range）は
     // git log。ctx.range が無い、または git log が空ならフォールバックする。
     let authorInfo: string;
-    if (ctx.source === "staged") {
-      authorInfo = `ステージ済み変更・コミットなし。${DIFF_ONLY_AUTHOR_INFO}`;
+    if (ctx.source === "workspace") {
+      authorInfo = `作業ツリーの未コミット変更（staged+unstaged+untracked）・コミットなし。${DIFF_ONLY_AUTHOR_INFO}`;
     } else if (ctx.range) {
       const logResult = await boundExec("git", [
         "log",
@@ -332,6 +339,7 @@ export async function runLocalReview(
 
     return { final: result.final, ctx };
   } finally {
+    dispose();
     progress.done();
     progress.reportCost(totalCostUsd);
   }
@@ -360,6 +368,7 @@ export async function runPrReview(
   });
 
   let totalCostUsd = 0;
+  let dispose: () => void = () => {};
   try {
     // step0: PR メタ取得（headRefOid・baseRefOid・baseRefName を含む。gh pr view の
     // 重複呼び出しを避ける。collectContext の PR モードにも baseRef として渡す）。
@@ -370,7 +379,7 @@ export async function runPrReview(
     // step0: ローカル HEAD と PR HEAD の一致ゲート。LLM コストを一切かける前に確認する。
     await assertPrHeadMatches(pr, meta.headRefOid, { exec: boundExec });
 
-    const ctx = await collectContext(
+    const collected = await collectContext(
       {
         mode: "pr",
         pr,
@@ -378,6 +387,8 @@ export async function runPrReview(
       },
       { exec: boundExec },
     );
+    const { context: ctx } = collected;
+    dispose = collected.dispose;
     debug("ctx", ctx);
     progress.succeedStep();
 
@@ -425,6 +436,7 @@ export async function runPrReview(
 
     return { final, ctx, postedUrl, headRefOid: meta.headRefOid };
   } finally {
+    dispose();
     progress.done();
     progress.reportCost(totalCostUsd);
   }

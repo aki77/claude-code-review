@@ -19,6 +19,7 @@ import type {
   Rule,
   Tier,
 } from "./types.ts";
+import { createWorkspaceIndex, mergeEnv } from "./workspace-index.ts";
 
 type Exec = typeof execFileAsync;
 
@@ -172,12 +173,19 @@ export async function getChangedFilesFromRange(
   return splitLines(out.stdout);
 }
 
-export async function getStagedFiles({
-  exec = execFileAsync,
-}: {
-  exec?: Exec;
-} = {}): Promise<string[]> {
-  const out = await exec("git", ["diff", "--staged", "--name-only"]);
+// workspace モード: baseRef（HEAD or 空ツリー SHA）に対する tracked ファイルの変更
+// （staged+unstaged 統合）を、一時 index の env 付きで列挙する。untracked は呼び出し側
+// （workspace-index が返す untracked 一覧）で合流させるため、ここでは含めない。
+export async function getWorkspaceTrackedFiles(
+  baseRef: string,
+  env: NodeJS.ProcessEnv,
+  { exec = execFileAsync }: { exec?: Exec } = {},
+): Promise<string[]> {
+  const out = await exec(
+    "git",
+    ["diff", baseRef, "--name-only", "--find-renames"],
+    { env },
+  );
   return splitLines(out.stdout);
 }
 
@@ -214,7 +222,7 @@ export interface ChangedLinesResult {
 }
 
 // レビュー対象（kept）ファイルの変更「行数」を算出する。
-// diffArgs（range or --staged）と excludeArgs.git（生成物・バイナリの除外 pathspec）を
+// diffArgs（range or HEAD/空ツリーSHA）と excludeArgs.git（生成物・バイナリの除外 pathspec）を
 // 本 diff とまったく同じ引数で numstat に渡すことで、tier 判定が本 diff とズレないようにする。
 // バイナリ行（added/deleted が null）は行数集計に含めない。
 // perFile は「numstat の生パス → { added, deleted }」の Map。oversized 検出と、oversized を
@@ -225,7 +233,7 @@ export interface ChangedLinesResult {
 export async function collectChangedLines(
   diffArgs: string[],
   excludeArgs: string[],
-  { exec = execFileAsync }: { exec?: Exec } = {},
+  { exec = execFileAsync, env }: { exec?: Exec; env?: NodeJS.ProcessEnv } = {},
 ): Promise<ChangedLinesResult> {
   const args = [
     "diff",
@@ -234,7 +242,10 @@ export async function collectChangedLines(
     ...diffArgs,
     ...excludeArgs,
   ];
-  const result = await exec("git", args, { maxBuffer: 256 * 1024 * 1024 });
+  const result = await exec("git", args, {
+    maxBuffer: 256 * 1024 * 1024,
+    env,
+  });
   if (result.code !== 0) {
     // numstat の取得に失敗しても tier 判定を落とさない（normal 相当＝全エージェント起動）。
     return {
@@ -704,113 +715,152 @@ export type CollectContextOpts =
     }
   | { mode: "range"; range?: string };
 
+export interface CollectContextResult {
+  context: Context;
+  // range/pr モードでは no-op。workspace モードでは一時 index ファイルを削除する
+  // （実 index・作業ツリーには触れない）。呼び出し側（pipeline.ts）は全ステップ完了後の
+  // finally で必ず呼ぶこと。
+  dispose(): void;
+}
+
+const noopDispose = (): void => {};
+
 export async function collectContext(
   opts: CollectContextOpts,
   { exec = execFileAsync }: { exec?: Exec } = {},
-): Promise<Context> {
+): Promise<CollectContextResult> {
   let range: string | undefined;
   let rawFiles: string[];
-  if (opts.mode === "pr") {
-    range = await resolvePrBaseRange(opts.pr, { exec, baseRef: opts.baseRef });
-    rawFiles = await getChangedFilesFromRange(range, { exec });
-  } else {
-    // 引数なし実行 かつ ステージ済み変更あり → staged モード（コミット前レビュー）。
-    // それ以外は range を解決する。range の有無で staged / range を判別する。
-    const staged = opts.range ? [] : await getStagedFiles({ exec });
-    if (staged.length > 0) {
-      rawFiles = staged;
-    } else {
+  let diffEnv: Record<string, string> | undefined;
+  let dispose: () => void = noopDispose;
+
+  try {
+    if (opts.mode === "pr") {
+      range = await resolvePrBaseRange(opts.pr, {
+        exec,
+        baseRef: opts.baseRef,
+      });
+      rawFiles = await getChangedFilesFromRange(range, { exec });
+    } else if (opts.range) {
+      // --range 明示指定 → 従来どおり range モード（後方互換）。
       range = await resolveRange(opts.range, { exec });
       rawFiles = await getChangedFilesFromRange(range, { exec });
+    } else {
+      // 引数なし実行（デフォルト）→ workspace モード: staged+unstaged+untracked を
+      // 一時 GIT_INDEX_FILE 経由で単一の統一 diff として扱う（案B。詳細は workspace-index.ts）。
+      // createWorkspaceIndex 自体がこの try の中にあるため、シード後の失敗（abort 含む）で
+      // 一時 index に到達不能になることはない（正常 return 後は関数内で dispose 差し替え済み、
+      // 例外時は createWorkspaceIndex 内で掃除済みのため catch の dispose() は no-op）。
+      const workspaceIndex = await createWorkspaceIndex({ exec });
+      diffEnv = workspaceIndex.env;
+      dispose = workspaceIndex.dispose;
+      const trackedFiles = await getWorkspaceTrackedFiles(
+        workspaceIndex.baseRef,
+        mergeEnv(diffEnv),
+        { exec },
+      );
+      rawFiles = [...new Set([...trackedFiles, ...workspaceIndex.untracked])];
+      range = workspaceIndex.baseRef;
     }
-  }
 
-  // レビュー対象外（生成物・バイナリ・linguist 属性付き）を機械的に除外する。
-  // 除外したファイルは excludedFiles として明示し、暗黙のスキップにしない。
-  // 先にデフォルト glob で除外できるものを外し、残りだけ git check-attr に問い合わせる
-  // （バイナリ多数の diff で check-attr へ渡すパスを減らす）。
-  const globSurvivors = rawFiles.filter(
-    (f) => !fileMatchesPatterns(f, DEFAULT_EXCLUDE_GLOBS),
-  );
-  const attrExcludedSet = await detectLinguistExcluded(globSurvivors, { exec });
-  const { kept: keptFiles, excluded: excludedFiles } = classifyFiles(rawFiles, {
-    attrExcludedSet,
-  });
-
-  const diffArgs = range ? [range] : ["--staged"];
-
-  // まず「生成物/バイナリのみ除外」した diff で numstat を取り、ファイル別行数を得る。
-  // この perFile から oversized（1ファイルが巨大な変更）を分離する。行数集計は同じ出力から
-  // 得られるので numstat は1回だけ（追加コストなし）。
-  const lineStats = await collectChangedLines(
-    diffArgs,
-    buildExcludeArgs(excludedFiles).git,
-    {
+    // レビュー対象外（生成物・バイナリ・linguist 属性付き）を機械的に除外する。
+    // 除外したファイルは excludedFiles として明示し、暗黙のスキップにしない。
+    // 先にデフォルト glob で除外できるものを外し、残りだけ git check-attr に問い合わせる
+    // （バイナリ多数の diff で check-attr へ渡すパスを減らす）。
+    const globSurvivors = rawFiles.filter(
+      (f) => !fileMatchesPatterns(f, DEFAULT_EXCLUDE_GLOBS),
+    );
+    const attrExcludedSet = await detectLinguistExcluded(globSurvivors, {
       exec,
-    },
-  );
-  const { changedFiles, oversizedFiles } = splitOversized(
-    keptFiles,
-    lineStats.perFile,
-    OVERSIZED_MAX_LINES,
-  );
+    });
+    const { kept: keptFiles, excluded: excludedFiles } = classifyFiles(
+      rawFiles,
+      { attrExcludedSet },
+    );
 
-  const rules = await collectRules(changedFiles);
+    const diffArgs = [range as string];
 
-  // 最終の除外引数は excludedFiles（生成物/バイナリ）と oversizedFiles（大規模）の両方を含む。
-  // 以降の diff 取得・アンカー解決はすべてこの excludeArgs.git を経由するため、oversized は
-  // 全 diff から一様に消える（emit-diff / diff-anchor は無改修で整合する）。
-  const excludeArgs = buildExcludeArgs([...excludedFiles, ...oversizedFiles]);
+    // まず「生成物/バイナリのみ除外」した diff で numstat を取り、ファイル別行数を得る。
+    // この perFile から oversized（1ファイルが巨大な変更）を分離する。行数集計は同じ出力から
+    // 得られるので numstat は1回だけ（追加コストなし）。
+    const lineStats = await collectChangedLines(
+      diffArgs,
+      buildExcludeArgs(excludedFiles).git,
+      {
+        exec,
+        env: diffEnv ? mergeEnv(diffEnv) : undefined,
+      },
+    );
+    const { changedFiles, oversizedFiles } = splitOversized(
+      keptFiles,
+      lineStats.perFile,
+      OVERSIZED_MAX_LINES,
+    );
 
-  // メトリクス・tier は oversized を除いた「実際にレビューする」規模で確定する。
-  // oversized 分の行数は上の numstat（perFile）から減算するだけで求まるため git は再実行しない。
-  // oversized は kept と照合済みで perFile に必ず存在し、バイナリ行は perFile に載らないので
-  // 減算に混入しない。ファイル数は changedFiles.length（oversized 除外後）。
-  let oversizedAdded = 0;
-  let oversizedDeleted = 0;
-  for (const f of oversizedFiles) {
-    const stat = lineStats.perFile.get(f);
-    if (stat) {
-      oversizedAdded += stat.added;
-      oversizedDeleted += stat.deleted;
+    const rules = await collectRules(changedFiles);
+
+    // 最終の除外引数は excludedFiles（生成物/バイナリ）と oversizedFiles（大規模）の両方を含む。
+    // 以降の diff 取得・アンカー解決はすべてこの excludeArgs.git を経由するため、oversized は
+    // 全 diff から一様に消える（emit-diff / diff-anchor は無改修で整合する）。
+    const excludeArgs = buildExcludeArgs([...excludedFiles, ...oversizedFiles]);
+
+    // メトリクス・tier は oversized を除いた「実際にレビューする」規模で確定する。
+    // oversized 分の行数は上の numstat（perFile）から減算するだけで求まるため git は再実行しない。
+    // oversized は kept と照合済みで perFile に必ず存在し、バイナリ行は perFile に載らないので
+    // 減算に混入しない。ファイル数は changedFiles.length（oversized 除外後）。
+    let oversizedAdded = 0;
+    let oversizedDeleted = 0;
+    for (const f of oversizedFiles) {
+      const stat = lineStats.perFile.get(f);
+      if (stat) {
+        oversizedAdded += stat.added;
+        oversizedDeleted += stat.deleted;
+      }
     }
+    const totalAdded = lineStats.totalAdded - oversizedAdded;
+    const totalDeleted = lineStats.totalDeleted - oversizedDeleted;
+    const metrics = {
+      totalFiles: changedFiles.length,
+      totalAdded,
+      totalDeleted,
+      totalChangedLines: totalAdded + totalDeleted,
+    };
+    const tier = classifyTier(metrics.totalFiles, metrics.totalChangedLines);
+
+    // tier に応じてルール準拠エージェントの割り当てを縮退させる
+    // （small は buckets[1] を空にして2体目の起動を抑止する）。
+    const assignments = buildAssignments(changedFiles, rules, undefined, tier);
+
+    // source は全モードで出力する。PR モードもローカル range に統一されたため、diffArgs /
+    // range を持つ（PR は `<baseRefOid>...HEAD`、workspace は `HEAD` or 空ツリー SHA）。
+    const source: ContextSource =
+      opts.mode === "pr" ? "pr" : opts.range ? "range" : "workspace";
+    const context: Context = {
+      source,
+      changedFiles,
+      excludedFiles,
+      // 変更行数が閾値超で個別レビューが困難と判断し、レビュー対象から外したファイル。
+      // excludedFiles（生成物/バイナリ）とは除外理由が異なる別枠。excludeArgs.git にも含まれる。
+      oversizedFiles,
+      // 各 diff 取得コマンド向けの除外引数。
+      excludeArgs,
+      assignments,
+      // 変更規模と tier（プロンプトはこの tier を読み、起動エージェント数を決める）。
+      metrics,
+      tier,
+      // diffArgs は後続の `git diff <diffArgs>` 用引数（全モードで差分取得を一様化）。
+      diffArgs,
+      // range は PR モードと range モードで持つ（workspace モードでは undefined。
+      // baseRef は内部実装の詳細であり、ユーザー向けの「範囲指定」とは意味が異なるため）。
+      range: opts.mode === "pr" || opts.range ? range : undefined,
+      diffEnv,
+    };
+
+    return { context, dispose };
+  } catch (error) {
+    // ここまでの処理で失敗した場合、workspace モードの一時 index を残さない
+    // （呼び出し側の finally に到達しないため、ここで dispose する）。
+    dispose();
+    throw error;
   }
-  const totalAdded = lineStats.totalAdded - oversizedAdded;
-  const totalDeleted = lineStats.totalDeleted - oversizedDeleted;
-  const metrics = {
-    totalFiles: changedFiles.length,
-    totalAdded,
-    totalDeleted,
-    totalChangedLines: totalAdded + totalDeleted,
-  };
-  const tier = classifyTier(metrics.totalFiles, metrics.totalChangedLines);
-
-  // tier に応じてルール準拠エージェントの割り当てを縮退させる
-  // （small は buckets[1] を空にして2体目の起動を抑止する）。
-  const assignments = buildAssignments(changedFiles, rules, undefined, tier);
-
-  // source は全モードで出力する。PR モードもローカル range に統一されたため、diffArgs /
-  // range を持つ（PR は `<baseRefOid>...HEAD`、staged は `--staged`）。
-  const source: ContextSource =
-    opts.mode === "pr" ? "pr" : range ? "range" : "staged";
-  const context: Context = {
-    source,
-    changedFiles,
-    excludedFiles,
-    // 変更行数が閾値超で個別レビューが困難と判断し、レビュー対象から外したファイル。
-    // excludedFiles（生成物/バイナリ）とは除外理由が異なる別枠。excludeArgs.git にも含まれる。
-    oversizedFiles,
-    // 各 diff 取得コマンド向けの除外引数。
-    excludeArgs,
-    assignments,
-    // 変更規模と tier（プロンプトはこの tier を読み、起動エージェント数を決める）。
-    metrics,
-    tier,
-    // diffArgs は後続の `git diff <diffArgs>` 用引数（全モードで差分取得を一様化）。
-    diffArgs,
-  };
-  // range は PR モードと range モードで存在する（staged モードでは存在しない）。
-  if (range) context.range = range;
-
-  return context;
 }

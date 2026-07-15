@@ -186,16 +186,16 @@ describe("diff-anchor", () => {
     ]);
   });
 
-  it("buildDiffArgs: staged モードと除外引数を連結する", () => {
+  it("buildDiffArgs: workspace モード（HEAD）と除外引数を連結する", () => {
     const args = buildDiffArgs({
-      diffArgs: ["--staged"],
+      diffArgs: ["HEAD"],
       excludeArgs: { git: ["--", ".", ":(exclude)dist/x.js"] },
     });
     expect(args).toEqual([
       "-c",
       "core.quotepath=false",
       "diff",
-      "--staged",
+      "HEAD",
       "--",
       ".",
       ":(exclude)dist/x.js",

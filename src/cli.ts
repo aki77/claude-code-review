@@ -39,7 +39,8 @@ Commands:
   pr <number>        指定した PR をレビューする
 
 Options:
-  --range [<range>]             local 専用。差分範囲を指定（省略時は staged を自動判別）
+  --range [<range>]             local 専用。差分範囲を指定（省略時は作業ツリーの未コミット
+                                 変更全体＝staged+unstaged+untracked をレビュー）
   --comment                     pr 専用。レビュー結果を PR にインラインコメントとして投稿する
   --background, -b <text>       自動取得できない背景情報（要件・意図）をインラインで指定する
   --background-file, -B <path>  背景情報をファイルから読み込む（8000字上限・サニタイズ適用）
@@ -233,8 +234,9 @@ async function dispatch(
   }
 
   if (args.command === "local") {
-    // --range 値省略（`--range` のみ）→ range: undefined で staged 自動判別
-    // （collect-context.ts の collectContext が range 引数なしなら staged を優先する）。
+    // --range 値省略（`--range` のみ）→ range: undefined で workspace モードにフォールバック
+    // （collect-context.ts の collectContext は range 引数なしなら workspace モード＝
+    // staged+unstaged+untracked を一時 index 経由の統一 diff としてレビューする）。
     const rangeOpt = args.range === true ? undefined : args.range;
     try {
       const { final, ctx } = await runLocalReview(

@@ -39,13 +39,16 @@ code-review pr <number> [--comment] [--background <text>] [--background-file <pa
 ```
 
 - `local`: ローカルの差分をレビューする。
-  - `--range` を省略すると、まずステージ済み変更（`git diff --staged`）を自動判別する。
-  - `--range` の値を省略（`--range` のみ）した場合や引数なし実行時でステージ済み変更が
-    無い場合は、現在のブランチの base を自動解決する
-    （`branch.<name>.github-pr-base-branch` → `vscode-merge-base` → `@{upstream}` →
-    `origin/HEAD` の順にフォールバック）。
+  - `--range` を省略した場合（引数なし実行、および `--range` のみで値を省略した場合を含む）は
+    **workspace モード**になる。作業ツリーの未コミット変更全体
+    （staged + unstaged + untracked）を、一時 `GIT_INDEX_FILE` 経由で単一の統一 diff として
+    扱う（実 index・作業ツリーは一切変更しない）。untracked ファイルも new file 追加として
+    diff に含まれる。
   - `--range <range>` で明示的にレビュー対象範囲を指定できる（`..` を含まなければ
-    `<range>...HEAD` に補完される）。
+    `<range>...HEAD` に補完される）。値を明示指定したときのみ、現在のブランチの base の
+    自動解決（`branch.<name>.github-pr-base-branch` → `vscode-merge-base` →
+    `@{upstream}` → `origin/HEAD` の順にフォールバック）が使われる
+    （`<range>` に `..` を含まない base 名だけを渡した場合の補完処理）。
 - `pr <number>`: 指定した PR をレビューする。
   - ローカルの HEAD が PR の HEAD と一致していない場合は、LLM を呼ぶ前にエラー終了する
     （対象 PR のブランチをチェックアウトしてから再実行する）。

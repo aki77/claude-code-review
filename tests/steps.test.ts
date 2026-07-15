@@ -23,7 +23,7 @@ import {
 
 function baseCtx(overrides: Partial<Context> = {}): Context {
   return {
-    source: "staged",
+    source: "workspace",
     changedFiles: ["a.ts"],
     excludedFiles: [],
     oversizedFiles: [],
@@ -36,7 +36,7 @@ function baseCtx(overrides: Partial<Context> = {}): Context {
       totalChangedLines: 1,
     },
     tier: "normal",
-    diffArgs: ["--staged"],
+    diffArgs: ["HEAD"],
     ...overrides,
   };
 }

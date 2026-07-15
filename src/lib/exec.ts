@@ -20,6 +20,7 @@ export function execFileAsync(
     maxBuffer?: number;
     input?: string;
     signal?: AbortSignal;
+    env?: NodeJS.ProcessEnv;
   } = {},
 ): Promise<ExecResult> {
   const { input, ...execOptions } = options;

@@ -15,7 +15,12 @@ index 0000000..1111111 100644
  }
 `;
 
-// staged モードで collectContext / pipeline が呼ぶ git コマンドを分岐するフェイク exec。
+// workspace モード（デフォルト local）で collectContext / pipeline が呼ぶ git コマンドを
+// 分岐するフェイク exec。workspace-index.ts のライフサイクル
+// （git rev-parse --git-path index → git rev-parse --verify HEAD → git ls-files --others →
+// (untracked があれば) git add -N）と、getWorkspaceTrackedFiles（git diff HEAD --name-only）を
+// ルーティングする。一時 index パスは実在しない架空パスを返す
+// （existsSync が false になるため copyFileSync はスキップされ、rmSync は force:true で無害）。
 function makeFakeExec(): (
   command: string,
   args: string[],
@@ -25,8 +30,27 @@ function makeFakeExec(): (
     if (command !== "git") return { stdout: "", stderr: "", code: 0 };
 
     if (
+      args[0] === "rev-parse" &&
+      args.includes("--git-path") &&
+      args.includes("index")
+    ) {
+      return {
+        stdout: "/tmp/fake-repo-does-not-exist/.git/index\n",
+        stderr: "",
+        code: 0,
+      };
+    }
+    if (args[0] === "rev-parse" && args.includes("--verify")) {
+      // HEAD あり（通常リポジトリ）。
+      return { stdout: "head000\n", stderr: "", code: 0 };
+    }
+    if (args[0] === "ls-files" && args.includes("--others")) {
+      // untracked なし。
+      return { stdout: "", stderr: "", code: 0 };
+    }
+    if (
       args[0] === "diff" &&
-      args.includes("--staged") &&
+      args.includes("HEAD") &&
       args.includes("--name-only")
     ) {
       return { stdout: "a.ts\n", stderr: "", code: 0 };
@@ -39,11 +63,11 @@ function makeFakeExec(): (
     }
     if (
       args.includes("diff") &&
-      args.includes("--staged") &&
+      args.includes("HEAD") &&
       !args.includes("--numstat") &&
       !args.includes("--name-only")
     ) {
-      // buildDiffArgs 経由の統一 diff 取得（-c core.quotepath=false diff --staged ...）。
+      // buildDiffArgs 経由の統一 diff 取得（-c core.quotepath=false diff HEAD ...）。
       return { stdout: DIFF_TEXT, stderr: "", code: 0 };
     }
     return { stdout: "", stderr: "", code: 0 };
@@ -181,7 +205,7 @@ describe("runLocalReview", () => {
       { exec: exec as never, query, readFile },
     );
 
-    expect(ctx.source).toBe("staged");
+    expect(ctx.source).toBe("workspace");
     expect(ctx.tier).toBe("small");
     expect(final.stats.confirmed).toBe(1);
     expect(final.issues[0]?.title).toContain("未定義変数");
