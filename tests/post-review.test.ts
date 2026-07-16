@@ -4,6 +4,7 @@ import {
   buildPayload,
   buildSuggestionBody,
   postReview,
+  SUMMARY_MARKER,
 } from "../src/lib/post-review.ts";
 import type { FinalDoc, Issue } from "../src/lib/types.ts";
 
@@ -91,8 +92,16 @@ describe("post-review", () => {
     );
     expect(p.commit_id).toBe("abc123");
     expect(p.event).toBe("COMMENT");
-    expect(p.body).toBe("## サマリ");
+    expect(p.body).toBe(`${SUMMARY_MARKER}\n\n## サマリ`);
     expect(p.comments.length).toBe(2);
+  });
+
+  it("buildPayload: summaryBody 先頭に SUMMARY_MARKER が付く（未指定でもマーカー行は入る）", () => {
+    const p = buildPayload({ comments: [] }, makeFinalDoc([]), {
+      commitId: "abc123",
+    });
+    expect(p.body).toBe(`${SUMMARY_MARKER}\n\n`);
+    expect(p.body.startsWith(SUMMARY_MARKER)).toBe(true);
   });
 
   it("toComment: 単一行は line+side のみ、start_*/subjectType を含めない", () => {
@@ -381,7 +390,7 @@ describe("post-review", () => {
       { commitId: "x" },
     );
     expect(p.comments).toEqual([]);
-    expect(p.body).toBe("問題は見つかりませんでした。");
+    expect(p.body).toBe(`${SUMMARY_MARKER}\n\n問題は見つかりませんでした。`);
   });
 
   it("許容: confirmed 0 件（FINAL 空）ならサマリのみ投稿", () => {

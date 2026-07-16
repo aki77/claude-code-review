@@ -25,6 +25,12 @@ import type {
 
 type Exec = typeof execFileAsync;
 
+// サマリーコメント本文の先頭に付与する固定マーカー。PR 上ではレンダリングされない
+// HTML コメントで、本文の部分文字列マッチによって当ツールのサマリーコメントを
+// 他のコメントと区別できるようにする（例: 古いサマリーコメントの一括削除）。
+// 固定文字列のみ（環境変数化はしない）。
+export const SUMMARY_MARKER = "<!-- claude-code-review -->";
+
 // params を GitHub REST の snake_case へ変換する。単一行は line+side のみ、
 // 複数行は start_line/start_side も含める。subjectType は落とす。
 function toComment(issue: Issue, body: string): RestComment {
@@ -224,7 +230,7 @@ export function buildPayload(
   return {
     commit_id: commitId,
     event: "COMMENT",
-    body: input.summaryBody ?? "",
+    body: `${SUMMARY_MARKER}\n\n${input.summaryBody ?? ""}`,
     comments: restComments,
   };
 }
