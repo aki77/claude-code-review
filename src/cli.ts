@@ -28,11 +28,12 @@ export type ParsedArgs = {
   background?: string;
   backgroundFile?: string;
   summaryFile?: string;
+  noFailOnFindings: boolean;
 };
 
 const USAGE = `Usage:
-  code-review local [--range [<range>]] [--background <text>] [--background-file <path>] [--summary-file <path>] [--debug] [--quiet]
-  code-review pr <number> [--comment] [--background <text>] [--background-file <path>] [--summary-file <path>] [--debug] [--quiet]
+  code-review local [--range [<range>]] [--background <text>] [--background-file <path>] [--summary-file <path>] [--no-fail-on-findings] [--debug] [--quiet]
+  code-review pr <number> [--comment] [--background <text>] [--background-file <path>] [--summary-file <path>] [--no-fail-on-findings] [--debug] [--quiet]
   code-review --help
 
 Commands:
@@ -48,6 +49,8 @@ Options:
   --summary-file <path>         レビュー結果＋実行メタを Markdown で指定パスに追記する
                                  （GitHub Actions の $GITHUB_STEP_SUMMARY 向け。--debug 併用時は
                                  各段の中間成果物を <details> 折りたたみで追記する）
+  --no-fail-on-findings         local/pr 共通。confirmed 指摘があっても exit 0 にする
+                                 （本当のエラーは従来どおり非0のまま区別できる）
   --debug                       デバッグログを出力する
   --quiet, -q                   進捗表示を抑制する
   -h, --help                    このヘルプを表示する
@@ -90,6 +93,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let background: string | undefined;
   let backgroundFile: string | undefined;
   let summaryFile: string | undefined;
+  let noFailOnFindings = false;
 
   let i = 0;
   while (i < argv.length) {
@@ -116,6 +120,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
     if (token === "--debug") {
       debug = true;
+      i += 1;
+      continue;
+    }
+
+    if (token === "--no-fail-on-findings") {
+      noFailOnFindings = true;
       i += 1;
       continue;
     }
@@ -203,6 +213,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       background,
       backgroundFile,
       summaryFile,
+      noFailOnFindings,
     };
   }
 
@@ -225,6 +236,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     background,
     backgroundFile,
     summaryFile,
+    noFailOnFindings,
   };
 }
 
@@ -238,6 +250,14 @@ function reportError(error: unknown): number {
   const message = error instanceof Error ? error.message : String(error);
   process.stderr.write(`error: ${message}\n`);
   return 1;
+}
+
+// confirmed 指摘 → exit code の判定（local/pr 共通、--no-fail-on-findings で 0 に上書き）。
+export function reviewExitCode(
+  confirmedCount: number,
+  noFailOnFindings: boolean,
+): number {
+  return confirmedCount > 0 && !noFailOnFindings ? 1 : 0;
 }
 
 // args.summaryFile 未指定時は何もしない（local/pr 共通のガード＋呼び出しの定型をまとめる）。
@@ -279,7 +299,7 @@ async function dispatch(
       );
       printSummary(final, ctx);
       maybeWriteSummaryFile(args, final, ctx, { totalCostUsd }, debugEntries);
-      return final.stats.confirmed > 0 ? 1 : 0;
+      return reviewExitCode(final.stats.confirmed, args.noFailOnFindings);
     } catch (error) {
       return reportError(error);
     }
@@ -305,7 +325,7 @@ async function dispatch(
         { totalCostUsd, postedUrl, prNumber: args.prNumber, headRefOid },
         debugEntries,
       );
-      return final.stats.confirmed > 0 ? 1 : 0;
+      return reviewExitCode(final.stats.confirmed, args.noFailOnFindings);
     } catch (error) {
       return reportError(error);
     }

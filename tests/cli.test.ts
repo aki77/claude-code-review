@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseArgs, UsageError } from "../src/cli.ts";
+import { parseArgs, reviewExitCode, UsageError } from "../src/cli.ts";
 
 describe("parseArgs", () => {
   it("--range の直後に短縮フラグ -q が来ても値として消費しない", () => {
@@ -93,5 +93,30 @@ describe("parseArgs", () => {
     expect(() => parseArgs(["local", "--summary-file"])).toThrow(
       /--summary-file には値が必要です/,
     );
+  });
+
+  it("--no-fail-on-findings を指定すると noFailOnFindings: true になる", () => {
+    const args = parseArgs(["local", "--no-fail-on-findings"]);
+    expect(args.noFailOnFindings).toBe(true);
+  });
+
+  it("--no-fail-on-findings 未指定時は noFailOnFindings: false になる", () => {
+    const args = parseArgs(["local"]);
+    expect(args.noFailOnFindings).toBe(false);
+  });
+});
+
+describe("reviewExitCode", () => {
+  it("指摘ありかつフラグ無効なら 1 を返す", () => {
+    expect(reviewExitCode(1, false)).toBe(1);
+  });
+
+  it("指摘ありでもフラグ有効なら 0 を返す", () => {
+    expect(reviewExitCode(1, true)).toBe(0);
+  });
+
+  it("指摘なしならフラグに関わらず 0 を返す", () => {
+    expect(reviewExitCode(0, false)).toBe(0);
+    expect(reviewExitCode(0, true)).toBe(0);
   });
 });
