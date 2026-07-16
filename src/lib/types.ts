@@ -277,3 +277,12 @@ export type JSONSchema = Record<string, unknown>;
 // `src/llm/steps.ts` の defaultReadFile（fs.readFileSync ベース）と
 // `src/lib/background.ts` の loadBackgroundFile が共有する。
 export type ReadFileFn = (relPath: string) => string | null;
+
+// ---- --debug / --summary-file 関連 ------------------------------------------
+
+// --debug 時に各パイプライン段が出す (label, obj) の蓄積単位。`src/pipeline.ts` の
+// makeDebugSink が生成し、`src/report.ts` の formatDebugMarkdown が Markdown 化する。
+export interface DebugEntry {
+  label: string;
+  obj: unknown;
+}

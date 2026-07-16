@@ -13,7 +13,7 @@
  */
 import { isAbortError } from "./lib/abort.ts";
 import { runLocalReview, runPrReview } from "./pipeline.ts";
-import { printSummary } from "./report.ts";
+import { printSummary, writeSummaryFile } from "./report.ts";
 
 type Command = "local" | "pr";
 
@@ -27,11 +27,12 @@ export type ParsedArgs = {
   help: boolean;
   background?: string;
   backgroundFile?: string;
+  summaryFile?: string;
 };
 
 const USAGE = `Usage:
-  code-review local [--range [<range>]] [--background <text>] [--background-file <path>] [--debug] [--quiet]
-  code-review pr <number> [--comment] [--background <text>] [--background-file <path>] [--debug] [--quiet]
+  code-review local [--range [<range>]] [--background <text>] [--background-file <path>] [--summary-file <path>] [--debug] [--quiet]
+  code-review pr <number> [--comment] [--background <text>] [--background-file <path>] [--summary-file <path>] [--debug] [--quiet]
   code-review --help
 
 Commands:
@@ -44,6 +45,9 @@ Options:
   --comment                     pr 専用。レビュー結果を PR にインラインコメントとして投稿する
   --background, -b <text>       自動取得できない背景情報（要件・意図）をインラインで指定する
   --background-file, -B <path>  背景情報をファイルから読み込む（8000字上限・サニタイズ適用）
+  --summary-file <path>         レビュー結果＋実行メタを Markdown で指定パスに追記する
+                                 （GitHub Actions の $GITHUB_STEP_SUMMARY 向け。--debug 併用時は
+                                 各段の中間成果物を <details> 折りたたみで追記する）
   --debug                       デバッグログを出力する
   --quiet, -q                   進捗表示を抑制する
   -h, --help                    このヘルプを表示する
@@ -85,6 +89,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let prNumber: number | undefined;
   let background: string | undefined;
   let backgroundFile: string | undefined;
+  let summaryFile: string | undefined;
 
   let i = 0;
   while (i < argv.length) {
@@ -151,6 +156,15 @@ export function parseArgs(argv: string[]): ParsedArgs {
       continue;
     }
 
+    if (token === "--summary-file") {
+      ({ value: summaryFile, nextIndex: i } = consumeRequiredValue(
+        argv,
+        i,
+        token,
+      ));
+      continue;
+    }
+
     if (isFlag(token)) {
       throw new UsageError(`unknown option: ${token}`);
     }
@@ -188,6 +202,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       range,
       background,
       backgroundFile,
+      summaryFile,
     };
   }
 
@@ -209,6 +224,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     help,
     background,
     backgroundFile,
+    summaryFile,
   };
 }
 
@@ -222,6 +238,18 @@ function reportError(error: unknown): number {
   const message = error instanceof Error ? error.message : String(error);
   process.stderr.write(`error: ${message}\n`);
   return 1;
+}
+
+// args.summaryFile 未指定時は何もしない（local/pr 共通のガード＋呼び出しの定型をまとめる）。
+function maybeWriteSummaryFile(
+  args: ParsedArgs,
+  final: Parameters<typeof writeSummaryFile>[1],
+  ctx: Parameters<typeof writeSummaryFile>[2],
+  meta: Parameters<typeof writeSummaryFile>[3],
+  debugEntries: Parameters<typeof writeSummaryFile>[4],
+): void {
+  if (!args.summaryFile) return;
+  writeSummaryFile(args.summaryFile, final, ctx, meta, debugEntries);
 }
 
 async function dispatch(
@@ -239,7 +267,7 @@ async function dispatch(
     // staged+unstaged+untracked を一時 index 経由の統一 diff としてレビューする）。
     const rangeOpt = args.range === true ? undefined : args.range;
     try {
-      const { final, ctx } = await runLocalReview(
+      const { final, ctx, totalCostUsd, debugEntries } = await runLocalReview(
         { mode: "range", range: rangeOpt },
         {
           debug: args.debug,
@@ -250,6 +278,7 @@ async function dispatch(
         },
       );
       printSummary(final, ctx);
+      maybeWriteSummaryFile(args, final, ctx, { totalCostUsd }, debugEntries);
       return final.stats.confirmed > 0 ? 1 : 0;
     } catch (error) {
       return reportError(error);
@@ -258,19 +287,24 @@ async function dispatch(
 
   if (args.command === "pr") {
     try {
-      const { final, ctx, postedUrl } = await runPrReview(
-        String(args.prNumber),
-        {
+      const { final, ctx, postedUrl, headRefOid, totalCostUsd, debugEntries } =
+        await runPrReview(String(args.prNumber), {
           debug: args.debug,
           comment: args.comment,
           quiet: args.quiet,
           background: args.background,
           backgroundFile: args.backgroundFile,
           abortController,
-        },
-      );
+        });
       printSummary(final, ctx);
       if (postedUrl) process.stdout.write(`posted: ${postedUrl}\n`);
+      maybeWriteSummaryFile(
+        args,
+        final,
+        ctx,
+        { totalCostUsd, postedUrl, prNumber: args.prNumber, headRefOid },
+        debugEntries,
+      );
       return final.stats.confirmed > 0 ? 1 : 0;
     } catch (error) {
       return reportError(error);

@@ -77,4 +77,21 @@ describe("parseArgs", () => {
       /--background-file には値が必要です/,
     );
   });
+
+  it("--summary-file でサマリー出力先パスを指定できる（local）", () => {
+    const args = parseArgs(["local", "--summary-file", "/tmp/summary.md"]);
+    expect(args.summaryFile).toBe("/tmp/summary.md");
+  });
+
+  it("--summary-file でサマリー出力先パスを指定できる（pr）", () => {
+    const args = parseArgs(["pr", "123", "--summary-file", "/tmp/summary.md"]);
+    expect(args.summaryFile).toBe("/tmp/summary.md");
+  });
+
+  it("--summary-file の値が欠落している場合は UsageError", () => {
+    expect(() => parseArgs(["local", "--summary-file"])).toThrow(UsageError);
+    expect(() => parseArgs(["local", "--summary-file"])).toThrow(
+      /--summary-file には値が必要です/,
+    );
+  });
 });

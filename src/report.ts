@@ -4,10 +4,12 @@
 // 載せない（local-review SKILL.md:29）が、件数サマリは final.issues から決定論的に
 // 生成して先頭に出す（追加 LLM 呼び出しはゼロ）。
 
+import { appendFileSync } from "node:fs";
 import { SEVERITY_PRIORITY } from "./lib/process-findings.ts";
 import type {
   Category,
   Context,
+  DebugEntry,
   FinalDoc,
   Issue,
   Severity,
@@ -160,4 +162,146 @@ export function printSummary(
   write: (s: string) => void = (s) => process.stdout.write(s),
 ): void {
   write(`${formatSummary(final, ctx)}\n`);
+}
+
+// --summary-file 出力用の実行メタ情報。CLI 側（local/pr 両方）で組み立てて渡す軽量オブジェクト。
+export interface SummaryMeta {
+  totalCostUsd: number;
+  postedUrl?: string;
+  prNumber?: number;
+  headRefOid?: string;
+}
+
+function formatMetaSection(ctx: Context, meta: SummaryMeta): string[] {
+  const lines: string[] = ["### 実行メタ情報", ""];
+
+  const target: string[] = [];
+  if (meta.prNumber !== undefined) target.push(`PR #${meta.prNumber}`);
+  if (meta.headRefOid) target.push(`commit \`${meta.headRefOid.slice(0, 7)}\``);
+  target.push(`source: ${ctx.source}`);
+  lines.push(`- 対象: ${target.join(" / ")}`);
+
+  lines.push(
+    `- 変更規模: ${ctx.tier}（${ctx.metrics.totalFiles} ファイル / +${ctx.metrics.totalAdded} -${ctx.metrics.totalDeleted}）`,
+  );
+
+  if (ctx.excludedFiles.length > 0 || ctx.oversizedFiles.length > 0) {
+    const excludedParts: string[] = [];
+    if (ctx.excludedFiles.length > 0) {
+      excludedParts.push(`対象外 ${ctx.excludedFiles.length} ファイル`);
+    }
+    if (ctx.oversizedFiles.length > 0) {
+      excludedParts.push(`大規模変更 ${ctx.oversizedFiles.length} ファイル`);
+    }
+    lines.push(`- 対象外ファイル: ${excludedParts.join(" / ")}`);
+  }
+
+  lines.push(`- LLM コスト: $${meta.totalCostUsd.toFixed(4)}`);
+
+  if (meta.postedUrl) {
+    lines.push(`- 投稿先: ${meta.postedUrl}`);
+  }
+
+  return lines;
+}
+
+// PR コメント同様、太字バッジの Markdown 版 issueBlock。
+function issueBlockMarkdown(issue: FinalDoc["issues"][number]): string {
+  const badge = formatBadge(issue, { bold: true });
+  const location =
+    issue.resolved && issue.params && "line" in issue.params
+      ? `\`${issue.path}:${issue.params.line}\``
+      : `\`${issue.path}\`（行番号未確定）`;
+  return `- ${badge}  📍 ${location} ${issue.title}\n\n  ${issue.body}`;
+}
+
+// GitHub Actions のジョブサマリー（$GITHUB_STEP_SUMMARY）向け Markdown を組み立てる。
+// 既存 formatSummary（プレーンテキスト、stdout 用）とは独立した見出しベースの整形。
+export function formatSummaryMarkdown(
+  final: FinalDoc,
+  ctx: Context,
+  meta: SummaryMeta,
+): string {
+  const lines: string[] = ["## Code Review", ""];
+  lines.push(formatCountSummary(final.issues));
+  lines.push("");
+  lines.push(...formatMetaSection(ctx, meta));
+
+  if (final.issues.length > 0) {
+    lines.push("", "### 指摘一覧", "");
+    lines.push(
+      final.issues.map((issue) => issueBlockMarkdown(issue)).join("\n\n"),
+    );
+  } else {
+    lines.push(
+      "",
+      "問題は見つかりませんでした。バグ・プロジェクトルール（CLAUDE.md / .claude/rules/）準拠・REVIEW.md準拠を確認しました。",
+    );
+  }
+
+  if (final.stats.rejected > 0) {
+    lines.push("", "### rejected", "");
+    for (const r of final.rejected) {
+      lines.push(`- \`${r.path}\` ${r.title}（${r.reason}）`);
+    }
+  }
+
+  if (final.stats.unverified > 0) {
+    lines.push(
+      "",
+      `### unverified: ${final.stats.unverified} 件`,
+      "",
+      final.unverified.join(", "),
+    );
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+// entries の obj（diff 由来の existingCode/body/summary 等を含みうる）に ``` が含まれると、
+// 固定3連続のコードフェンスがその位置で早期に閉じてしまい、以降の JSON・後続 <details> ブロックが
+// 生の Markdown として解釈され表示崩れの原因になる。GFM のコードフェンスは内容中の最長連続
+// バッククォートより1つ長く取れば安全に閉じないため、内容に応じてフェンス長を動的に決める。
+function backtickFence(content: string): string {
+  const matches = content.match(/`+/g);
+  const longest = matches
+    ? matches.reduce((max, m) => Math.max(max, m.length), 0)
+    : 0;
+  return "`".repeat(Math.max(longest + 1, 3));
+}
+
+// --debug 併用時、各パイプライン段の中間成果物を <details> 折りたたみの Markdown にする。
+// entries の順序はそのまま維持する（パイプライン実行順＝デバッグ順）。
+export function formatDebugMarkdown(entries: DebugEntry[]): string {
+  if (entries.length === 0) return "";
+  const blocks = entries.map(({ label, obj }) => {
+    const json = JSON.stringify(obj, null, 2);
+    const fence = backtickFence(json);
+    return `<details>\n<summary>${label}</summary>\n\n${fence}json\n${json}\n${fence}\n\n</details>`;
+  });
+  return `\n### デバッグ情報\n\n${blocks.join("\n\n")}\n`;
+}
+
+// --summary-file 指定時、レビュー結果＋実行メタ（＋--debug 併用時は中間成果物の
+// <details> 折りたたみ）を Markdown で指定パスに追記する。書き込み失敗（パス不正等）は
+// warning を stderr に出して握りつぶし、呼び出し側の exit code には影響させない
+// （cli.ts は summaryFile 指定時にこれを呼ぶだけで、整形・書き込みロジックは持たない）。
+export function writeSummaryFile(
+  summaryFile: string,
+  final: FinalDoc,
+  ctx: Context,
+  meta: SummaryMeta,
+  debugEntries: DebugEntry[],
+): void {
+  try {
+    const md =
+      formatSummaryMarkdown(final, ctx, meta) +
+      (debugEntries.length > 0 ? formatDebugMarkdown(debugEntries) : "");
+    appendFileSync(summaryFile, md);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(
+      `warning: --summary-file への書き込みに失敗しました: ${message}\n`,
+    );
+  }
 }

@@ -25,7 +25,7 @@ import {
 } from "./lib/pr-meta.ts";
 import { processFindings } from "./lib/process-findings.ts";
 import { makeProgressReporter, type ProgressReporter } from "./lib/progress.ts";
-import type { Context, FinalDoc, ReadFileFn } from "./lib/types.ts";
+import type { Context, DebugEntry, FinalDoc, ReadFileFn } from "./lib/types.ts";
 import {
   tierReducedClusters,
   validateClusters,
@@ -64,6 +64,10 @@ export interface PipelineDeps {
 export interface PipelineResult {
   final: FinalDoc;
   ctx: Context;
+  totalCostUsd: number;
+  // --debug 有効時のみ非空。--summary-file 出力の <details> 折りたたみに使う
+  // （makeDebugSink が stderr 書き出しと同時に蓄積する）。
+  debugEntries: DebugEntry[];
 }
 
 export interface PrReviewResult extends PipelineResult {
@@ -267,12 +271,16 @@ function resolveAuthorInfoWithBackground(
   return mergeAuthorInfo(authorInfo, background);
 }
 
-function makeDebugSink(enabled: boolean): DebugSink {
+// stderr への生ログ書き出しに加え、entries に (label, obj) を蓄積する。蓄積した内容は
+// --summary-file 出力時に formatDebugMarkdown で <details> 折りたたみに整形される
+// （enabled=false のときは何もしない No-op のまま、entries は常に空）。
+function makeDebugSink(enabled: boolean, entries: DebugEntry[]): DebugSink {
   return enabled
     ? (label, obj) => {
         process.stderr.write(
           `[debug] ${label}:\n${JSON.stringify(obj, null, 2)}\n`,
         );
+        entries.push({ label, obj });
       }
     : () => {};
 }
@@ -292,7 +300,8 @@ export async function runLocalReview(
   const boundExec = bindExecSignal(exec, runOpts.abortController?.signal);
   const query = deps.query;
   const readFile = deps.readFile ?? defaultReadFile;
-  const debug = makeDebugSink(runOpts.debug);
+  const debugEntries: DebugEntry[] = [];
+  const debug = makeDebugSink(runOpts.debug, debugEntries);
   const progress = makeProgressReporter({
     quiet: runOpts.quiet ?? false,
     debug: runOpts.debug,
@@ -337,7 +346,7 @@ export async function runLocalReview(
     });
     totalCostUsd = result.totalCostUsd;
 
-    return { final: result.final, ctx };
+    return { final: result.final, ctx, totalCostUsd, debugEntries };
   } finally {
     dispose();
     progress.done();
@@ -361,7 +370,8 @@ export async function runPrReview(
   const boundExec = bindExecSignal(exec, runOpts.abortController?.signal);
   const query = deps.query;
   const readFile = deps.readFile ?? defaultReadFile;
-  const debug = makeDebugSink(runOpts.debug);
+  const debugEntries: DebugEntry[] = [];
+  const debug = makeDebugSink(runOpts.debug, debugEntries);
   const progress = makeProgressReporter({
     quiet: runOpts.quiet ?? false,
     debug: runOpts.debug,
@@ -410,7 +420,13 @@ export async function runPrReview(
     const { final } = result;
 
     if (!runOpts.comment) {
-      return { final, ctx, headRefOid: meta.headRefOid };
+      return {
+        final,
+        ctx,
+        headRefOid: meta.headRefOid,
+        totalCostUsd,
+        debugEntries,
+      };
     }
 
     const nameWithOwner = await getNameWithOwner({ exec: boundExec });
@@ -434,7 +450,14 @@ export async function runPrReview(
     });
     progress.succeedStep();
 
-    return { final, ctx, postedUrl, headRefOid: meta.headRefOid };
+    return {
+      final,
+      ctx,
+      postedUrl,
+      headRefOid: meta.headRefOid,
+      totalCostUsd,
+      debugEntries,
+    };
   } finally {
     dispose();
     progress.done();
