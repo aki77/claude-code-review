@@ -43,10 +43,16 @@ code-review pr <number> [--comment] [--background <text>] [--background-file <pa
     **workspace モード**になる。作業ツリーの未コミット変更全体
     （staged + unstaged + untracked）を、一時 `GIT_INDEX_FILE` 経由で単一の統一 diff として
     扱う（実 index・作業ツリーは一切変更しない）。untracked ファイルも new file 追加として
-    diff に含まれる。
+    diff に含まれる。未コミット変更が **1 件もない**（すべてコミット済み）場合は、**base
+    ブランチとの差分に自動フォールバック**してレビューする。フォールバック時の base 解決は
+    下記（`--range` 明示時と同じ `github-pr-base-branch` → `vscode-merge-base` →
+    `@{upstream}` → `origin/HEAD` の順）を使う。この場合の出力は workspace ではなく range
+    扱いになり、サマリ先頭付近に
+    `未コミット変更なし → base 差分（<range>）をレビューしました。` が表示される。
   - `--range <range>` で明示的にレビュー対象範囲を指定できる（`..` を含まなければ
-    `<range>...HEAD` に補完される）。値を明示指定したときのみ、現在のブランチの base の
-    自動解決（`branch.<name>.github-pr-base-branch` → `vscode-merge-base` →
+    `<range>...HEAD` に補完される）。`--range` 明示指定時、および workspace モードで
+    未コミット変更が空だったフォールバック時に、現在のブランチの base の自動解決
+    （`branch.<name>.github-pr-base-branch` → `vscode-merge-base` →
     `@{upstream}` → `origin/HEAD` の順にフォールバック）が使われる
     （`<range>` に `..` を含まない base 名だけを渡した場合の補完処理）。
 - `pr <number>`: 指定した PR をレビューする。

@@ -224,6 +224,8 @@ export interface Context {
   range?: string;
   /** workspace モードのときのみ設定。diff 取得・アンカー再解決の exec に渡す env override。 */
   diffEnv?: Record<string, string>;
+  /** workspace モードで未コミット差分が空だったため base 差分にフォールバックしたとき true。 */
+  fellBackToRange?: boolean;
 }
 
 /** collectRules / rulesForFile が扱うルール定義。paths=null は全ファイル適用。 */

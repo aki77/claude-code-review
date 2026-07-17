@@ -749,6 +749,7 @@ export async function collectContext(
   let rawFiles: string[];
   let diffEnv: Record<string, string> | undefined;
   let dispose: () => void = noopDispose;
+  let fellBackToRange = false;
 
   try {
     if (opts.mode === "pr") {
@@ -777,6 +778,21 @@ export async function collectContext(
       );
       rawFiles = [...new Set([...trackedFiles, ...workspaceIndex.untracked])];
       range = workspaceIndex.baseRef;
+
+      // 未コミット変更が1件もない（＝全てコミット済み）場合は base ブランチとの差分に
+      // 自動フォールバックする。workspace の一時 index は不要になるので破棄する。
+      if (rawFiles.length === 0) {
+        dispose();
+        dispose = noopDispose;
+        diffEnv = undefined;
+        try {
+          range = await resolveRange(undefined, { exec });
+        } catch (cause) {
+          throw new Error(`未コミット変更がなく、${(cause as Error).message}`);
+        }
+        rawFiles = await getChangedFilesFromRange(range, { exec });
+        fellBackToRange = true;
+      }
     }
 
     // レビュー対象外（生成物・バイナリ・linguist 属性付き）を機械的に除外する。
@@ -851,10 +867,13 @@ export async function collectContext(
     // （small は buckets[1] を空にして2体目の起動を抑止する）。
     const assignments = buildAssignments(changedFiles, rules, undefined, tier);
 
+    // --range 明示指定 or フォールバック時は range 扱い（source/range 判定で共通利用）。
+    const isRangeLike = opts.mode !== "pr" && (!!opts.range || fellBackToRange);
+
     // source は全モードで出力する。PR モードもローカル range に統一されたため、diffArgs /
     // range を持つ（PR は `<baseRefOid>...HEAD`、workspace は `HEAD` or 空ツリー SHA）。
     const source: ContextSource =
-      opts.mode === "pr" ? "pr" : opts.range ? "range" : "workspace";
+      opts.mode === "pr" ? "pr" : isRangeLike ? "range" : "workspace";
     const context: Context = {
       source,
       changedFiles,
@@ -872,8 +891,9 @@ export async function collectContext(
       diffArgs,
       // range は PR モードと range モードで持つ（workspace モードでは undefined。
       // baseRef は内部実装の詳細であり、ユーザー向けの「範囲指定」とは意味が異なるため）。
-      range: opts.mode === "pr" || opts.range ? range : undefined,
+      range: opts.mode === "pr" || isRangeLike ? range : undefined,
       diffEnv,
+      fellBackToRange,
     };
 
     return { context, dispose };

@@ -146,6 +146,13 @@ export function formatSummary(final: FinalDoc, ctx: Context): string {
     }
   }
 
+  if (ctx.fellBackToRange) {
+    lines.push("");
+    lines.push(
+      `未コミット変更なし → base 差分（${ctx.range}）をレビューしました。`,
+    );
+  }
+
   if (ctx.tier !== "normal") {
     lines.push("");
     lines.push(

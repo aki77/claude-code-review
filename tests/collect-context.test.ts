@@ -669,3 +669,127 @@ describe("collectContext: workspace モード", () => {
     dispose();
   });
 });
+
+// 全コミット済み（未コミット差分ゼロ）時の base 差分フォールバックを検証する。
+// workspace 用 makeExec は「tracked 列挙」と「resolveRange 後の range name-only」を
+// 引数だけでは区別できない（どちらも diff --name-only --find-renames）ため、
+// 呼び出し順で応答を出し分ける専用スタブをここで用意する。
+describe("collectContext: workspace → base フォールバック", () => {
+  type Stub = (
+    command: string,
+    args: string[],
+    options?: { env?: NodeJS.ProcessEnv },
+  ) => Promise<ExecResult>;
+
+  function makeFallbackExec(opts: {
+    resolvable?: boolean;
+    rangeFiles?: string[];
+    rangeNumstat?: string;
+  }): {
+    exec: Stub;
+    calls: { args: string[]; options?: { env?: NodeJS.ProcessEnv } }[];
+  } {
+    const calls: { args: string[]; options?: { env?: NodeJS.ProcessEnv } }[] =
+      [];
+    // tracked 列挙（フォールバック前）と range 列挙（フォールバック後）はどちらも同じ
+    // diff --name-only --find-renames で引数だけでは区別できないため、呼び出し順
+    // （1回目=フォールバック前、2回目以降=フォールバック後）で出し分ける。
+    let nameOnlyCalls = 0;
+    const exec: Stub = async (command, args, options) => {
+      calls.push({ args, options });
+      if (command !== "git") return { stdout: "", stderr: "", code: 0 };
+      if (args[0] === "rev-parse" && args.includes("--git-path")) {
+        return {
+          stdout: "/tmp/fake-repo-does-not-exist/.git/index\n",
+          stderr: "",
+          code: 0,
+        };
+      }
+      if (args[0] === "rev-parse" && args.includes("--verify")) {
+        return { stdout: "head000\n", stderr: "", code: 0 };
+      }
+      if (args[0] === "ls-files" && args.includes("--others")) {
+        return { stdout: "", stderr: "", code: 0 };
+      }
+      // resolveRange: 現在ブランチ名
+      if (args[0] === "rev-parse" && args.includes("--abbrev-ref")) {
+        return { stdout: "feature/x\n", stderr: "", code: 0 };
+      }
+      // resolveRange 1,2段目（config 参照）は常に未設定として失敗させる。
+      if (args[0] === "config") {
+        return { stdout: "", stderr: "", code: 1 };
+      }
+      // resolveRange 3,4段目（merge-base）。opts.resolvable=false なら全段失敗、
+      // true（既定）なら 4 段目の origin/HEAD だけ成功させる。
+      if (args[0] === "merge-base") {
+        if ((opts.resolvable ?? true) && args.includes("origin/HEAD")) {
+          return { stdout: "base000\n", stderr: "", code: 0 };
+        }
+        return { stdout: "", stderr: "", code: 1 };
+      }
+      if (args[0] === "diff" && args.includes("--name-only")) {
+        nameOnlyCalls += 1;
+        // 1回目 = workspace の tracked 列挙。未コミットゼロなので常に空。
+        // 2回目以降 = getChangedFilesFromRange（フォールバック後の range 列挙）。
+        if (nameOnlyCalls === 1) {
+          return { stdout: "", stderr: "", code: 0 };
+        }
+        return {
+          stdout: `${(opts.rangeFiles ?? []).join("\n")}\n`,
+          stderr: "",
+          code: 0,
+        };
+      }
+      if (args[0] === "check-attr") {
+        return { stdout: "", stderr: "", code: 0 };
+      }
+      if (args[0] === "diff" && args.includes("--numstat")) {
+        return { stdout: opts.rangeNumstat ?? "", stderr: "", code: 0 };
+      }
+      return { stdout: "", stderr: "", code: 0 };
+    };
+    return { exec, calls };
+  }
+
+  it("未コミットゼロ → base フォールバック成功: source=range, fellBackToRange=true", async () => {
+    const { exec } = makeFallbackExec({
+      rangeFiles: ["a.ts"],
+      rangeNumstat: "1\t0\ta.ts\n",
+    });
+    const { context, dispose } = await collectContext(
+      { mode: "range" },
+      { exec },
+    );
+    expect(context.source).toBe("range");
+    expect(context.fellBackToRange).toBe(true);
+    expect(context.range).toBe("base000...HEAD");
+    expect(context.diffEnv).toBeUndefined();
+    expect(context.changedFiles).toEqual(["a.ts"]);
+    dispose();
+  });
+
+  it("未コミットゼロ かつ base 解決不能 → 明確なエラーで reject", async () => {
+    const { exec } = makeFallbackExec({ resolvable: false });
+    await expect(collectContext({ mode: "range" }, { exec })).rejects.toThrow(
+      /未コミット変更がなく、ベースブランチを自動解決できませんでした/,
+    );
+  });
+
+  it("フォールバック後の diff/numstat 呼び出しに一時 index env が混入しない", async () => {
+    const { exec, calls } = makeFallbackExec({
+      rangeFiles: ["a.ts"],
+      rangeNumstat: "1\t0\ta.ts\n",
+    });
+    const { context, dispose } = await collectContext(
+      { mode: "range" },
+      { exec },
+    );
+    expect(context.diffEnv).toBeUndefined();
+    const numstatCall = calls.find(
+      (c) => c.args[0] === "diff" && c.args.includes("--numstat"),
+    );
+    expect(numstatCall).toBeDefined();
+    expect(numstatCall?.options?.env).toBeUndefined();
+    dispose();
+  });
+});
