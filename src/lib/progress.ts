@@ -56,7 +56,15 @@ function makeSpinnerReporter(): ProgressReporter {
       if (spinner) {
         spinner.start(render());
       } else {
-        spinner = ora({ stream: process.stderr, text: render() }).start();
+        // discardStdin: false — ora 既定(true)だと stdin を raw mode にし、Ctrl+C が端末 SIGINT を
+        // 生成せず 0x03 バイト化されてしまう（SIGINT ハンドラが発火せず中断が効かない）。false にして
+        // Ctrl+C を通常の端末 SIGINT として届かせ、cli.ts の SIGINT ハンドラ（abortController.abort()）
+        // を確実に発火させる。
+        spinner = ora({
+          stream: process.stderr,
+          text: render(),
+          discardStdin: false,
+        }).start();
       }
     },
     tickAgent() {
