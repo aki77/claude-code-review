@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { BACKGROUND_MAX_CHARS } from "../src/lib/background.ts";
 import {
   DEFAULT_CONFIG,
   loadConfig,
@@ -265,6 +266,27 @@ describe("loadConfig", () => {
         DEFAULT_CONFIG.prompts.falsePositiveExclusions,
       );
       expect(warnSpy).toHaveBeenCalled();
+    });
+
+    it("file 由来の内容は制御文字が除去され上限で切り詰められる（sanitizeBackground 適用）", () => {
+      // 制御文字（NUL）を含み、上限を大きく超える内容。--background-file と同じ
+      // サニタイズ／上限を通ってプロンプトへ流れ込むことを確認する。
+      const huge = `head\u0000tail${"x".repeat(BACKGROUND_MAX_CHARS)}`;
+      const files: Record<string, string> = {
+        ".claude/review.yaml":
+          "prompts:\n  falsePositiveExclusions:\n    file: rules.md\n    mode: replace\n",
+        "rules.md": huge,
+      };
+      const config = loadConfig({
+        env: {},
+        readFile: (p) => files[p] ?? null,
+      });
+      const result = config.prompts.falsePositiveExclusions;
+      // 制御文字は除去される。
+      expect(result).not.toContain("\u0000");
+      expect(result.startsWith("headtail")).toBe(true);
+      // 上限（BACKGROUND_MAX_CHARS）で切り詰められる。
+      expect(result.length).toBe(BACKGROUND_MAX_CHARS);
     });
   });
 

@@ -11,6 +11,7 @@
 // 欠落（readFile→null）は全て既定/env で動く。YAML パースエラーは throw せず警告して
 // 既定へフォールバックする（設定ミスでレビューを止めない＝既存の tier 縮退思想と一致）。
 import { parse as parseYaml } from "yaml";
+import { sanitizeBackground } from "./background.ts";
 import { isEnvTruthy } from "./env.ts";
 import type { ReadFileFn } from "./types.ts";
 
@@ -226,7 +227,10 @@ export function resolvePromptFragment(
     return spec.mode === "replace" ? spec.text : `${base}\n${spec.text}`;
   }
 
-  // file 参照。
+  // file 参照。ファイル内容はそのままレビュー用プロンプトへ流れ込むため、--background-file と
+  // 同じ sanitizeBackground（制御文字除去＋上限切り詰め）を通す。設定ファイル所有者は
+  // 信頼するが、巨大ファイルや不正な制御文字/サロゲートがプロンプト・JSON シリアライズへ
+  // 混入するのを防ぐ堅牢化（loadBackgroundFile と同じ方針で一貫させる）。
   const content = readFile(spec.file);
   if (content === null) {
     warn(
@@ -234,7 +238,8 @@ export function resolvePromptFragment(
     );
     return base;
   }
-  return spec.mode === "replace" ? content : `${base}\n${content}`;
+  const sanitized = sanitizeBackground(content);
+  return spec.mode === "replace" ? sanitized : `${base}\n${sanitized}`;
 }
 
 // ---- YAML → RawConfig（欠落・パースエラーは null） ---------------------------
