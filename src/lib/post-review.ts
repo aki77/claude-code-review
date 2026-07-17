@@ -14,6 +14,7 @@
 // 文章コメントのみ投稿する（コードは絶対に消さない・レビュー全体は止めない）。
 import { lineRange, splitAndNormalize } from "./diff-anchor.ts";
 import { execFileAsync } from "./exec.ts";
+import { normalizeLlmNewlines } from "./sanitize-llm-text.ts";
 import type {
   FinalDoc,
   Issue,
@@ -206,12 +207,13 @@ export function buildPayload(
     }
 
     // suggestion があれば機械検証してフェンス結合。危険なら fail-closed で捨てて文章のみ。
-    let body = c.commentBody;
+    const normalizedCommentBody = normalizeLlmNewlines(c.commentBody);
+    let body = normalizedCommentBody;
     if (c.suggestion != null) {
       const r = buildSuggestionBody(issue, c.suggestion, c.deleteLines);
       body = r.ok
-        ? `${c.commentBody.trimEnd()}\n\n${r.body}`
-        : withStrippedNote(c.commentBody, r.reason);
+        ? `${normalizedCommentBody.trimEnd()}\n\n${r.body}`
+        : withStrippedNote(normalizedCommentBody, r.reason);
     }
     restComments.push(toComment(issue, body));
   });
@@ -230,7 +232,7 @@ export function buildPayload(
   return {
     commit_id: commitId,
     event: "COMMENT",
-    body: `${SUMMARY_MARKER}\n\n${input.summaryBody ?? ""}`,
+    body: `${SUMMARY_MARKER}\n\n${normalizeLlmNewlines(input.summaryBody ?? "")}`,
     comments: restComments,
   };
 }

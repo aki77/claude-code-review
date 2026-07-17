@@ -685,6 +685,9 @@ export async function llmCommentBodies(
   });
 
   return {
+    // リテラル \n の実改行への正規化は投稿本文組み立ての唯一の出口である
+    // buildPayload（post-review.ts）側で行う。ここで正規化すると、その値を
+    // 更に buildPayload が正規化する二重適用になり、対策箇所が分散する。
     summaryBody: raw.summaryBody || formatDeferredSummary(deferred),
     comments,
   };

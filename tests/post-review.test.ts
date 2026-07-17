@@ -96,6 +96,41 @@ describe("post-review", () => {
     expect(p.comments.length).toBe(2);
   });
 
+  it("buildPayload: リテラル \\n を含む summaryBody/commentBody は実改行に正規化される", () => {
+    const p = buildPayload(
+      {
+        summaryBody: "サマリ1行目\\nサマリ2行目",
+        comments: [
+          { id: "g1", commentBody: "本文1行目\\n本文2行目" },
+          { id: "g2", commentBody: "問題2" },
+        ],
+      },
+      makeBaseFinalDoc(),
+      { commitId: "abc123" },
+    );
+    expect(p.body).toBe(`${SUMMARY_MARKER}\n\nサマリ1行目\nサマリ2行目`);
+    expect(p.comments.find((c) => c.path === "src/a.js")!.body).toBe(
+      "本文1行目\n本文2行目",
+    );
+  });
+
+  it("buildPayload: suggestion フェンス連結（実改行）はリテラル \\n の正規化と無関係に壊れない", () => {
+    const p = buildPayload(
+      {
+        summaryBody: "s",
+        comments: [
+          { id: "g1", commentBody: "提案\\n続き", suggestion: "const x = 2;" },
+          { id: "g2", commentBody: "y" },
+        ],
+      },
+      makeBaseFinalDoc(),
+      { commitId: "x" },
+    );
+    expect(p.comments.find((c) => c.path === "src/a.js")!.body).toBe(
+      "提案\n続き\n\n```suggestion\nconst x = 2;\n```",
+    );
+  });
+
   it("buildPayload: summaryBody 先頭に SUMMARY_MARKER が付く（未指定でもマーカー行は入る）", () => {
     const p = buildPayload({ comments: [] }, makeFinalDoc([]), {
       commitId: "abc123",

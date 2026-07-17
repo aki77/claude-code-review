@@ -3,8 +3,10 @@ import { CONTEXT7_SERVER_NAME } from "../src/lib/mcp-config.ts";
 import {
   bugAgentSystem,
   bugAgentUser,
+  COMMENT_BODIES_SCHEMA,
   clusterAgentSystem,
   clusterAgentUser,
+  commentBodiesSystem,
   FALSE_POSITIVE_EXCLUSIONS,
   FINDINGS_SCHEMA,
   MERGE_TEXT_SCHEMA,
@@ -71,6 +73,31 @@ describe("reviewTools", () => {
       ...READ_ONLY_TOOLS,
       `mcp__${CONTEXT7_SERVER_NAME}`,
     ]);
+  });
+});
+
+describe("commentBodiesSystem / COMMENT_BODIES_SCHEMA", () => {
+  it("commentBodiesSystem にリテラル \\n 禁止の注意文言が含まれる", () => {
+    const system = commentBodiesSystem();
+    expect(system).toContain("実際の改行文字");
+    expect(system).toContain("`\\n`");
+  });
+
+  it("COMMENT_BODIES_SCHEMA の summaryBody/commentBody に改行注意の description が付く", () => {
+    const props = (
+      COMMENT_BODIES_SCHEMA as {
+        properties: {
+          summaryBody: { description?: string };
+          comments: {
+            items: { properties: { commentBody: { description?: string } } };
+          };
+        };
+      }
+    ).properties;
+    expect(props.summaryBody.description).toContain("実際の改行文字");
+    expect(props.comments.items.properties.commentBody.description).toContain(
+      "実際の改行文字",
+    );
   });
 });
 

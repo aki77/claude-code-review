@@ -200,17 +200,23 @@ export const VERDICT_SCHEMA: JSONSchema = {
 // step9: PR コメント本文作成。```suggestion フェンス（buildSuggestionBody が組む、
 // post-review.ts:142）と category/severity バッジ・パーマリンク（steps.ts が TS で付与）は
 // スキーマに含めない。LLM には文章と「置換後の行だけ」の suggestion 案のみを書かせる。
+const NEWLINE_FIELD_DESCRIPTION =
+  "改行は実際の改行文字で表現すること。`\\n` という2文字の文字列を書かないこと。";
+
 export const COMMENT_BODIES_SCHEMA: JSONSchema = {
   type: "object",
   properties: {
-    summaryBody: { type: "string" },
+    summaryBody: { type: "string", description: NEWLINE_FIELD_DESCRIPTION },
     comments: {
       type: "array",
       items: {
         type: "object",
         properties: {
           id: { type: "string" },
-          commentBody: { type: "string" },
+          commentBody: {
+            type: "string",
+            description: NEWLINE_FIELD_DESCRIPTION,
+          },
           suggestion: { type: "array", items: { type: "string" } },
           deleteLines: { type: "array", items: { type: "string" } },
         },
@@ -639,7 +645,9 @@ export function commentBodiesSystem(): string {
     "suggestion を書く場合は ```suggestion フェンスを書かず、置換後の行だけを配列で渡してください。" +
     "existingCode の行のうち、suggestion に残らず削除される行があれば、その行の内容をそのまま" +
     "deleteLines に明示してください（明示が無い・不足していると suggestion は投稿時に破棄されます）。\n" +
-    "resolved:false（行番号未確定）の課題は comments に含めず、summaryBody 側で言及してください。"
+    "resolved:false（行番号未確定）の課題は comments に含めず、summaryBody 側で言及してください。\n" +
+    "commentBody と summaryBody の改行は実際の改行文字で表現し、" +
+    "`\\n` という2文字の文字列を本文に書かないこと。"
   );
 }
 

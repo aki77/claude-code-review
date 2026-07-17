@@ -771,4 +771,22 @@ describe("llmCommentBodies", () => {
     expect(result.summaryBody).not.toContain("問題は見つかりませんでした");
     expect(result.summaryBody).toContain("タイトル");
   });
+
+  // リテラル \n → 実改行の正規化は投稿本文組み立ての唯一の出口である
+  // buildPayload（post-review.ts）側の責務。llmCommentBodies はここでは
+  // LLM 出力を正規化せずそのまま素通しする（tests/post-review.test.ts で正規化を検証）。
+  it("LLM が返したリテラル \\n はここでは変換されず素通りする", async () => {
+    const query = makeFakeQuery({
+      summaryBody: "サマリ1行目\\nサマリ2行目",
+      comments: [{ id: "g1", commentBody: "本文1行目\\n本文2行目" }],
+    });
+    const result = await llmCommentBodies(
+      finalDoc([baseIssue()]),
+      { prHeadSha: "sha1", nameWithOwner: "owner/repo" },
+      { query },
+    );
+    expect(result.summaryBody).toBe("サマリ1行目\\nサマリ2行目");
+    const c = result.comments[0];
+    expect(c?.commentBody).toContain("本文1行目\\n本文2行目");
+  });
 });
