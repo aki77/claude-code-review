@@ -9,6 +9,11 @@
 // より read-only ツール（Read/Grep/Glob）＋ context7 MCP（既定 ON）の使用を前提にプロンプトを
 // 書く（steps.ts が reviewTools()/buildReviewMcpServers() を明示的に渡す）。
 import type { McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
+import {
+  envModel,
+  FALSE_POSITIVE_EXCLUSIONS,
+  type ResolvedConfig,
+} from "../lib/config.ts";
 import { isEnvTruthy } from "../lib/env.ts";
 import {
   buildReviewMcpServers,
@@ -17,29 +22,19 @@ import {
 } from "../lib/mcp-config.ts";
 import type { Cluster, Issue, JSONSchema } from "../lib/types.ts";
 
-// ---- 誤検知除外リスト（元プラグイン shared/review-core.md 由来） -------------
-// 元プラグインはステップ3・6の両方に適用していたが、本再実装では検証(step6)にのみ
-// 集約する: 発見段階（agent1-5）は幅広く拾い、確度の担保は検証エージェントが
-// read-only ツールで実コードに当たって行う（「既存問題か」「lint 類か」を実際に確認できる）。
-export const FALSE_POSITIVE_EXCLUSIONS =
-  "次に該当するものは誤検知として rejected にしてください:\n" +
-  "- レビュー対象の変更より前から存在する問題（今回の変更が持ち込んだものではない）\n" +
-  "- バグに見えるが実際は正しい挙動\n" +
-  "- シニアエンジニアであれば指摘しないような細かすぎる指摘\n" +
-  "- リンタが検出する類の問題（リンタを実際に走らせて検証する必要はない）\n" +
-  "- プロジェクトルールで明示的に求められていない、一般的なコード品質の懸念" +
-  "（テストカバレッジ不足、一般的なセキュリティ懸念など）\n" +
-  "- プロジェクトルールに記載があっても、コード側で明示的に抑制されている事項" +
-  "（lint の ignore コメントなど）";
+// 誤検知除外リスト（元プラグイン shared/review-core.md 由来）の定数本体は
+// config.ts（DEFAULT_CONFIG の既定値の源）へ移設済み。config.ts → prompts.ts の
+// import 循環を避けるため、config.ts を単一の情報源にして prompts.ts はここで
+// re-export するだけにする（既存の import 元 "../llm/prompts.ts" を壊さない）。
+export { FALSE_POSITIVE_EXCLUSIONS };
 
 // ---- モデルエイリアス定数 ----------------------------------------------------
 // runStructured の model はそのまま SDK query() → claude CLI へ渡る（client.ts）。
 // CLI が sonnet/opus エイリアスを解決するのでフルモデル ID をハードコードしない。
 // 利用リポジトリごとにプロンプト改変なしで使用モデルを差し替えられるよう環境変数で
 // 上書き可能にする（collect-context.ts のしきい値 env と同じ CODE_REVIEW_* 系）。
-function envModel(v: string | undefined, fallback: string): string {
-  return v?.trim() || fallback;
-}
+// envModel 自体は config.ts へ移設済み（config.ts の resolveConfig と単一の情報源にするため）。
+// この定数は config? 省略時（no-arg 呼び出し）のフォールバックとして残す。
 export const MODEL_LIGHT = envModel(
   process.env.CODE_REVIEW_MODEL_LIGHT,
   "sonnet",
@@ -58,16 +53,30 @@ export const READ_ONLY_TOOLS = ["Read", "Grep", "Glob"] as const;
 // allowedTools へ名前を足すだけで使える。既定 OFF、CODE_REVIEW_ENABLE_WEB で opt-in。
 export const WEB_TOOLS = ["WebFetch", "WebSearch"] as const;
 
+// context7/web の有効判定。config 省略時は現行 env 参照
+// （isContext7Enabled/isEnvTruthy）にフォールバックする。reviewTools()（allowedTools 組み立て）と
+// toolUsageInstruction()（案内文言）の両方が同じ判定を必要とするため、ここを単一の情報源にする
+// （両者で判定がずれると「許可ツールと案内文言が食い違う」不整合を招く）。
+function resolveContext7Enabled(config?: ResolvedConfig): boolean {
+  return config ? config.tools.context7 : isContext7Enabled();
+}
+
+function resolveWebEnabled(config?: ResolvedConfig): boolean {
+  return config
+    ? config.tools.web
+    : isEnvTruthy(process.env.CODE_REVIEW_ENABLE_WEB);
+}
+
 // 全レビュー系ステップ（agent1〜5＋検証step6）共通の allowedTools 合成ヘルパ。
 // READ_ONLY_TOOLS を基点に、context7 MCP（"mcp__<server>" 形式のサーバーレベル
 // ワイルドカードで個別ツール列挙なしに全ツールを許可できる）と、
 // CODE_REVIEW_ENABLE_WEB が truthy なら WEB_TOOLS を足す。
-export function reviewTools(): string[] {
+export function reviewTools(config?: ResolvedConfig): string[] {
   const tools: string[] = [...READ_ONLY_TOOLS];
-  if (isContext7Enabled()) {
+  if (resolveContext7Enabled(config)) {
     tools.push(`mcp__${CONTEXT7_SERVER_NAME}`);
   }
-  if (isEnvTruthy(process.env.CODE_REVIEW_ENABLE_WEB)) {
+  if (resolveWebEnabled(config)) {
     tools.push(...WEB_TOOLS);
   }
   return tools;
@@ -77,14 +86,17 @@ export function reviewTools(): string[] {
 // （allowedTools/mcpServers/abortController）。steps.ts の llmReviewAgents/llmVerifyIssues の
 // 双方で同じ組み立てが必要なため、ここを単一の情報源にする。
 // abortController は Ctrl+C 中断伝播用（省略時は undefined のまま素通しする）。
-export function buildReviewOpts(abortController?: AbortController): {
+export function buildReviewOpts(
+  abortController?: AbortController,
+  config?: ResolvedConfig,
+): {
   allowedTools: string[];
   mcpServers: Record<string, McpServerConfig> | undefined;
   abortController: AbortController | undefined;
 } {
   return {
-    allowedTools: reviewTools(),
-    mcpServers: buildReviewMcpServers(),
+    allowedTools: reviewTools(config),
+    mcpServers: buildReviewMcpServers(config),
     abortController,
   };
 }
@@ -243,20 +255,24 @@ const EXISTING_CODE_INSTRUCTION =
 // includeReadTools: false で read-only ツール部分のみ省く（重複させない）。
 // context7 MCP・Web（WebFetch/WebSearch）は有効なときだけ追記する
 // （使えないツールへの言及は無駄な試行を誘発するため出し分ける）。
+// config 省略時は現行 env 参照にフォールバックする（reviewTools() と同じ判定を共有し、
+// 実際に許可される allowedTools と案内文言が食い違わないようにする）。
 function toolUsageInstruction({
   includeReadTools,
+  config,
 }: {
   includeReadTools: boolean;
+  config?: ResolvedConfig;
 }): string {
   const readToolsPart = includeReadTools
     ? "diff の内容に加え、呼び出し元・型定義・関連ファイルなど diff 外のコードも " +
       "Read/Grep/Glob ツールで確認してよい。それでも確信が持てない指摘は行わないこと。"
     : "";
-  const webEnabled = isEnvTruthy(process.env.CODE_REVIEW_ENABLE_WEB);
   const parts: string[] = [];
-  if (isContext7Enabled())
+  if (resolveContext7Enabled(config))
     parts.push("context7 で依存ライブラリの最新の実仕様");
-  if (webEnabled) parts.push("WebFetch/WebSearch で公式ドキュメント");
+  if (resolveWebEnabled(config))
+    parts.push("WebFetch/WebSearch で公式ドキュメント");
   const externalReferencePart =
     parts.length > 0
       ? `\nライブラリ API の仕様が疑わしい場合は、${parts.join("・")}を確認してよい。`
@@ -315,7 +331,7 @@ export function summaryClustersUser({
 
 // ---- agent1/2: プロジェクトルール準拠チェック --------------------------------
 
-export function ruleAgentSystem(): string {
+export function ruleAgentSystem(config?: ResolvedConfig): string {
   return (
     "あなたはプロジェクトルール（CLAUDE.md および .claude/rules/ 配下のルールファイル）への" +
     "準拠を監査するレビューエージェントです。\n" +
@@ -324,7 +340,7 @@ export function ruleAgentSystem(): string {
     "各指摘は category を必ず rule-violation にし、ruleRefs に適用したルールファイルのパスを" +
     "非空配列で含めてください。\n" +
     `${EXISTING_CODE_INSTRUCTION}\n` +
-    toolUsageInstruction({ includeReadTools: true })
+    toolUsageInstruction({ includeReadTools: true, config })
   );
 }
 
@@ -361,14 +377,14 @@ export function ruleAgentUser({
 // 精度優先の方針転換（tmp/open-code-review-調査.md）により、以前の「diff 限定」設計を
 // 緩め、Read/Grep/Glob での diff 外参照を許可する（toolUsageInstruction()）。
 
-export function bugAgentSystem(): string {
+export function bugAgentSystem(config?: ResolvedConfig): string {
   return (
     "あなたはバグ検出を専門とするレビューエージェントです。明らかなバグを探してください。\n" +
     "重大なバグのみを指摘し、些細な指摘や誤検知の可能性が高いものは無視してください。\n" +
     "category は bug / security / performance のいずれか最も当てはまるものを選んでください" +
     "（rule-violation は使わないこと）。\n" +
     `${EXISTING_CODE_INSTRUCTION}\n` +
-    toolUsageInstruction({ includeReadTools: true })
+    toolUsageInstruction({ includeReadTools: true, config })
   );
 }
 
@@ -388,7 +404,7 @@ export function bugAgentUser({
 
 // ---- agent4: クロスファイル整合性チェック（クラスタ単位） --------------------
 
-export function clusterAgentSystem(): string {
+export function clusterAgentSystem(config?: ResolvedConfig): string {
   return (
     "あなたはバグ検出／クロスファイル整合性チェックを専門とするレビューエージェントです。" +
     "担当クラスタの changedFiles に導入された問題（セキュリティ問題、ロジック誤り、" +
@@ -404,7 +420,7 @@ export function clusterAgentSystem(): string {
     "無視してください。\n" +
     "category は bug / security / performance のいずれか（rule-violation は使わないこと）。\n" +
     EXISTING_CODE_INSTRUCTION +
-    toolUsageInstruction({ includeReadTools: false })
+    toolUsageInstruction({ includeReadTools: false, config })
   );
 }
 
@@ -434,7 +450,7 @@ export function clusterAgentUser({
 
 // ---- agent5: REVIEW.md 準拠チェック ------------------------------------------
 
-export function reviewMdAgentSystem(): string {
+export function reviewMdAgentSystem(config?: ResolvedConfig): string {
   return (
     "あなたは REVIEW.md に記載されたレビュー観点への新規違反を監査するレビューエージェントです。\n" +
     "高シグナルな指摘のみを対象とします。以下に該当する指摘のみを行ってください:\n" +
@@ -446,7 +462,7 @@ export function reviewMdAgentSystem(): string {
     "category は必ず rule-violation にし、ruleRefs に REVIEW.md（および参照した観点ファイル）の" +
     "パスを非空配列で含めてください。\n" +
     `${EXISTING_CODE_INSTRUCTION}\n` +
-    toolUsageInstruction({ includeReadTools: true })
+    toolUsageInstruction({ includeReadTools: true, config })
   );
 }
 
@@ -498,7 +514,9 @@ export function mergeTextUser({
 
 // ---- step6: 検証 --------------------------------------------------------------
 
-export function verifySystem(): string {
+export function verifySystem(config?: ResolvedConfig): string {
+  const falsePositiveExclusions =
+    config?.prompts.falsePositiveExclusions ?? FALSE_POSITIVE_EXCLUSIONS;
   return (
     "あなたは提示された課題が高い確度で実際の問題であるかを検証するレビューエージェントです。\n" +
     "Read/Grep/Glob ツールを使って対象ファイルの実コードを確認し、既存の挙動・呼び出し元・型定義を" +
@@ -506,10 +524,10 @@ export function verifySystem(): string {
     "例えば「変数が未定義」と指摘された場合、コード上で実際にそれが正しいかを確認してください。\n" +
     "プロジェクトルール違反の場合、適用スコープは確定済みのため、その範囲内で実際に違反しているかのみを" +
     "検証してください。\n" +
-    `${FALSE_POSITIVE_EXCLUSIONS}\n\n` +
+    `${falsePositiveExclusions}\n\n` +
     "実際の問題だと高い確度で確認できたら confirmed、そうでなければ rejected を返してください。" +
     "reason には判定の根拠を1〜2文で書いてください。" +
-    toolUsageInstruction({ includeReadTools: false })
+    toolUsageInstruction({ includeReadTools: false, config })
   );
 }
 

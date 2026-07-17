@@ -308,6 +308,21 @@ describe("verifySystem/User", () => {
     expect(sys).toContain("既存");
     expect(sys).toContain("リンタ");
   });
+
+  it("config.prompts.falsePositiveExclusions が replace 済みの文字列なら既定文言を含まない（.claude/review.yaml 配線）", () => {
+    const sys = verifySystem({
+      models: { light: "sonnet", heavy: "sonnet" },
+      thresholds: {
+        smallMaxFiles: 5,
+        smallMaxLines: 150,
+        oversizedMaxLines: 1000,
+      },
+      tools: { context7: true, web: false },
+      prompts: { falsePositiveExclusions: "プロジェクト独自の除外ルールのみ" },
+    });
+    expect(sys).not.toContain(FALSE_POSITIVE_EXCLUSIONS);
+    expect(sys).toContain("プロジェクト独自の除外ルールのみ");
+  });
 });
 
 describe("externalReferenceInstruction（context7/Web の出し分け, verifySystem 経由で検証）", () => {

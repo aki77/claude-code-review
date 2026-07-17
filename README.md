@@ -254,22 +254,80 @@ jobs:
 
 事前に `claude` CLI でログイン済みか、対応する認証用の環境変数が設定されていれば動く。
 
-## env 上書き一覧（`CODE_REVIEW_*`）
+## 設定（`.claude/review.yaml` + `CODE_REVIEW_*` env）
 
-変更規模の分類（tier）としきい値、および使用するモデルエイリアスは環境変数で
+変更規模の分類（tier）としきい値・使用するモデルエイリアス・誤検知除外リストなどは
+プロジェクトルートの `.claude/review.yaml`（省略可・全キー任意）と環境変数の両方で
 上書きできる（プロンプト自体は変更不要）。
 
-| 環境変数 | 既定値 | 説明 |
-| --- | --- | --- |
-| `CODE_REVIEW_SMALL_MAX_FILES` | 5 | tier=small と判定する最大ファイル数 |
-| `CODE_REVIEW_SMALL_MAX_LINES` | 150 | tier=small と判定する最大変更行数 |
-| `CODE_REVIEW_OVERSIZED_MAX_LINES` | 1000 | 1ファイルの変更行数がこれを超えるとレビュー対象から除外（oversizedFiles） |
-| `CODE_REVIEW_MODEL_LIGHT` | `sonnet` | 軽量ステップ（agent1/2/5・rule 検証・要約/マージ等）で使うモデルエイリアス |
-| `CODE_REVIEW_MODEL_HEAVY` | `sonnet` | 重量ステップ（agent3/4・bug 検証）で使うモデルエイリアス |
-| `CODE_REVIEW_DISABLE_CONTEXT7` | 未設定（有効） | `1`（または `true`、大小文字無視）で全レビュー系ステップの context7 MCP を無効化 |
-| `CODE_REVIEW_ENABLE_WEB` | 未設定（無効） | `1`（または `true`、大小文字無視）で全レビュー系ステップに WebFetch/WebSearch を追加 |
+**優先順位は `env > YAML > 既定`**。env は「実行環境ごとの一時上書き」、YAML は
+「プロジェクト単位の恒久設定」という位置づけ。`.claude/review.yaml` が無い場合は
+全キーが既定値（env が設定されていればそちらが優先）で動く。YAML のパースに失敗した
+場合も、レビュー自体は止めずに警告を出して既定値にフォールバックする。
+
+### YAML の全キー
+
+```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/aki77/claude-code-review/main/schema/review.schema.json
+models:
+  light: sonnet   # agent1/2/5・rule 検証・要約/マージ等で使うモデルエイリアス
+  heavy: sonnet   # agent3/4・bug 検証で使うモデルエイリアス
+thresholds:
+  smallMaxFiles: 5        # tier=small と判定する最大ファイル数
+  smallMaxLines: 150      # tier=small と判定する最大変更行数
+  oversizedMaxLines: 1000 # 1ファイルの変更行数がこれを超えるとレビュー対象から除外
+tools:
+  context7: true  # context7 MCP（依存ライブラリの実仕様確認用）を有効にするか
+  web: false      # WebFetch/WebSearch を有効にするか
+prompts:
+  falsePositiveExclusions: |   # 検証ステップ(step6)の誤検知除外リストに追記する文言
+    - この repo では XXX は誤検知として扱う
+```
+
+先頭の `# yaml-language-server: $schema=...` はエディタ（[redhat.vscode-yaml] 等）向けの
+補完・typo 検出用の1行で、CLI 実行には不要。省いても動作に影響しない。
+
+[redhat.vscode-yaml]: https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml
+
+### 対応する環境変数
+
+| 環境変数 | 対応する YAML キー | 既定値 | 説明 |
+| --- | --- | --- | --- |
+| `CODE_REVIEW_SMALL_MAX_FILES` | `thresholds.smallMaxFiles` | 5 | tier=small と判定する最大ファイル数 |
+| `CODE_REVIEW_SMALL_MAX_LINES` | `thresholds.smallMaxLines` | 150 | tier=small と判定する最大変更行数 |
+| `CODE_REVIEW_OVERSIZED_MAX_LINES` | `thresholds.oversizedMaxLines` | 1000 | 1ファイルの変更行数がこれを超えるとレビュー対象から除外（oversizedFiles） |
+| `CODE_REVIEW_MODEL_LIGHT` | `models.light` | `sonnet` | 軽量ステップ（agent1/2/5・rule 検証・要約/マージ等）で使うモデルエイリアス |
+| `CODE_REVIEW_MODEL_HEAVY` | `models.heavy` | `sonnet` | 重量ステップ（agent3/4・bug 検証）で使うモデルエイリアス |
+| `CODE_REVIEW_DISABLE_CONTEXT7` | `tools.context7`（極性が逆） | 未設定（有効） | `1`（または `true`、大小文字無視）で全レビュー系ステップの context7 MCP を無効化 |
+| `CODE_REVIEW_ENABLE_WEB` | `tools.web` | 未設定（無効） | `1`（または `true`、大小文字無視）で全レビュー系ステップに WebFetch/WebSearch を追加 |
+
+`CODE_REVIEW_DISABLE_CONTEXT7` は「無効化フラグ」、YAML の `tools.context7` は
+「有効化フラグ」で極性が逆な点に注意（env が設定されていれば YAML の値に関わらず
+`!isEnvTruthy(env)` が優先される）。
 
 tier に応じて起動する LLM エージェントの数が変わる（small ほど少ない）。
+
+### 誤検知除外リストのカスタマイズ（`prompts.falsePositiveExclusions`）
+
+検証ステップ（step6）が使う誤検知除外リストは、プロジェクトごとにカスタマイズできる。
+指定方法は3通り（`mode` 省略時は既定で `append`＝リストへの追記）:
+
+```yaml
+prompts:
+  # 1. インライン文字列（最短記法。既定文言へ追記される）
+  falsePositiveExclusions: |
+    - この repo では XXX は誤検知として扱う
+
+  # 2. { text, mode } 形式（mode: replace で完全に差し替え）
+  falsePositiveExclusions:
+    text: "このプロジェクトでは以下のみを誤検知として扱う: ..."
+    mode: replace
+
+  # 3. { file, mode } 形式（プロジェクト相対の .md 等を読み込む）
+  falsePositiveExclusions:
+    file: .claude/false-positive-exclusions.md
+    mode: append
+```
 
 ## 設計上の特徴
 

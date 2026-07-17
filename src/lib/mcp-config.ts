@@ -5,6 +5,7 @@
 // 退避経路を用意する（無効時は undefined を返し、client.ts の mcpServers 条件付きスプレッドで
 // 口を閉じる）。
 import type { McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
+import type { ResolvedConfig } from "./config.ts";
 import { isEnvTruthy } from "./env.ts";
 
 // mcpServers のキー名。prompts.ts の reviewTools() が allowedTools に
@@ -20,7 +21,9 @@ const CONTEXT7_SERVER_CONFIG: McpServerConfig = {
 };
 
 // CODE_REVIEW_DISABLE_CONTEXT7 の判定を単一の情報源にする。
-// prompts.ts の reviewTools()/externalReferenceInstruction() からも参照される。
+// prompts.ts の reviewTools()/toolUsageInstruction() からも参照される。
+// config 省略時のみ env を直読みする（config 経由の呼び出しは resolveConfig 側で
+// 既に env>YAML>既定 の優先順位を解決済みのため、ここでは config.tools.context7 を読むだけ）。
 export function isContext7Enabled(): boolean {
   return !isEnvTruthy(process.env.CODE_REVIEW_DISABLE_CONTEXT7);
 }
@@ -28,9 +31,10 @@ export function isContext7Enabled(): boolean {
 // レビュー系ステップへ渡す mcpServers を組み立てる。
 // context7 が無効なら undefined を返し、MCP を渡さない
 // （client.ts の runStructured は mcpServers === undefined のとき options に含めない）。
-export function buildReviewMcpServers():
-  | Record<string, McpServerConfig>
-  | undefined {
-  if (!isContext7Enabled()) return undefined;
+export function buildReviewMcpServers(
+  config?: ResolvedConfig,
+): Record<string, McpServerConfig> | undefined {
+  const enabled = config ? config.tools.context7 : isContext7Enabled();
+  if (!enabled) return undefined;
   return { [CONTEXT7_SERVER_NAME]: CONTEXT7_SERVER_CONFIG };
 }

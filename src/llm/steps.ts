@@ -10,6 +10,7 @@ import type {
   ModelUsage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { isAbortError } from "../lib/abort.ts";
+import type { ResolvedConfig } from "../lib/config.ts";
 import type { ProgressReporter } from "../lib/progress.ts";
 import type {
   Assignment,
@@ -75,6 +76,22 @@ export interface StepDeps {
   progress?: ProgressReporter;
   // Ctrl+C 中断伝播用。渡すと各 runStructured 呼び出しに abortController として配線される。
   abortController?: AbortController;
+  // プロジェクト設定（.claude/review.yaml + env）。省略時は各ステップが現行の
+  // module const/env フォールバックを使う（pipeline.ts が loadConfig() の結果を注入する）。
+  config?: ResolvedConfig;
+}
+
+// config.models 省略時の module const フォールバックを1箇所に集約する。
+// 各ステップ関数が `deps.config?.models.light ?? MODEL_LIGHT` を個別に手書きしていた
+// 重複（6箇所）をこのヘルパー呼び出しに置き換える。
+function resolveModels(config?: ResolvedConfig): {
+  light: string;
+  heavy: string;
+} {
+  return {
+    light: config?.models.light ?? MODEL_LIGHT,
+    heavy: config?.models.heavy ?? MODEL_HEAVY,
+  };
 }
 
 // デフォルトの readFile: fs.readFileSync、例外→null。
@@ -157,6 +174,7 @@ export async function llmSummaryAndClusters(
 ): Promise<SummaryAndClustersResult> {
   const wantClusters = ctx.tier === "normal";
   const queryFn = deps.query;
+  const { light: modelLight } = resolveModels(deps.config);
 
   deps.progress?.startStep("要約", 1);
   const fallback: SummaryAndClustersResult = {
@@ -173,7 +191,7 @@ export async function llmSummaryAndClusters(
         {
           system: summaryClustersSystem({ wantClusters }),
           user: summaryClustersUser({ authorInfo, diffText, wantClusters }),
-          model: MODEL_LIGHT,
+          model: modelLight,
           schema: wantClusters ? SUMMARY_CLUSTERS_SCHEMA : SUMMARY_ONLY_SCHEMA,
           abortController: deps.abortController,
         },
@@ -242,8 +260,10 @@ export async function llmReviewAgents(
   const debug = deps.debug;
   const costSink = deps.costSink;
   const progress = deps.progress;
+  const config = deps.config;
+  const { light: modelLight, heavy: modelHeavy } = resolveModels(config);
   // 全レビュー系エージェント（agent1〜5）共通の allowedTools/mcpServers（＋中断用 abortController）。
-  const reviewOpts = buildReviewOpts(deps.abortController);
+  const reviewOpts = buildReviewOpts(deps.abortController, config);
 
   const tasks: Promise<unknown[]>[] = [];
 
@@ -264,9 +284,9 @@ export async function llmReviewAgents(
         () => {
           const ruleTexts = collectRuleTexts(assignment.files, readFile);
           return runFindingsAgent(
-            ruleAgentSystem(),
+            ruleAgentSystem(config),
             ruleAgentUser({ agent, assignment, ruleTexts, summary, diffText }),
-            MODEL_LIGHT,
+            modelLight,
             queryFn,
             reviewOpts,
           );
@@ -285,9 +305,9 @@ export async function llmReviewAgents(
       "agent3",
       () =>
         runFindingsAgent(
-          bugAgentSystem(),
+          bugAgentSystem(config),
           bugAgentUser({ summary, diffText }),
-          MODEL_HEAVY,
+          modelHeavy,
           queryFn,
           reviewOpts,
         ),
@@ -312,14 +332,14 @@ export async function llmReviewAgents(
           }));
           const clusterDiff = filterDiffByFiles(diffText, cluster.changedFiles);
           return runFindingsAgent(
-            clusterAgentSystem(),
+            clusterAgentSystem(config),
             clusterAgentUser({
               cluster,
               summary,
               diffText: clusterDiff,
               contextFiles,
             }),
-            MODEL_HEAVY,
+            modelHeavy,
             queryFn,
             reviewOpts,
           );
@@ -340,9 +360,9 @@ export async function llmReviewAgents(
         "agent5",
         () =>
           runFindingsAgent(
-            reviewMdAgentSystem(),
+            reviewMdAgentSystem(config),
             reviewMdAgentUser({ reviewMd, summary, diffText }),
-            MODEL_LIGHT,
+            modelLight,
             queryFn,
             reviewOpts,
           ),
@@ -380,6 +400,7 @@ export async function llmMergeTexts(
   const debug = deps.debug;
   const costSink = deps.costSink;
   const progress = deps.progress;
+  const { light: modelLight } = resolveModels(deps.config);
   const targets = findingsDoc.groups.filter((g) => g.needsMergeText);
   if (targets.length === 0) return [];
 
@@ -403,7 +424,7 @@ export async function llmMergeTexts(
             {
               system: mergeTextSystem(),
               user: mergeTextUser({ members }),
-              model: MODEL_LIGHT,
+              model: modelLight,
               schema: MERGE_TEXT_SCHEMA,
               abortController: deps.abortController,
             },
@@ -441,6 +462,7 @@ export async function retryUnresolvedAnchors(
   const debug = deps.debug;
   const costSink = deps.costSink;
   const progress = deps.progress;
+  const { light: modelLight } = resolveModels(deps.config);
 
   const unresolved = findingsDoc.findings.filter(
     (f) => f.status === "active" && !f.resolved,
@@ -462,7 +484,7 @@ export async function retryUnresolvedAnchors(
         {
           system: retryAnchorSystem(),
           user: retryAnchorUser({ unresolved, diffText: scopedDiff }),
-          model: MODEL_LIGHT,
+          model: modelLight,
           schema: RETRY_ANCHOR_SCHEMA,
           abortController: deps.abortController,
         },
@@ -493,13 +515,15 @@ export async function llmVerifyIssues(
   const debug = deps.debug;
   const costSink = deps.costSink;
   const progress = deps.progress;
+  const config = deps.config;
+  const { light: modelLight, heavy: modelHeavy } = resolveModels(config);
   // レビュー系ステップ共通の allowedTools/mcpServers（agent1〜5 と同一方針。steps.ts 冒頭参照）。
-  const reviewOpts = buildReviewOpts(deps.abortController);
+  const reviewOpts = buildReviewOpts(deps.abortController, config);
 
   progress?.startStep("検証", issues.length);
   const results = await Promise.all(
     issues.map(async (issue) => {
-      const model = issue.kind === "bug" ? MODEL_HEAVY : MODEL_LIGHT;
+      const model = issue.kind === "bug" ? modelHeavy : modelLight;
       const issueDiff = filterDiffByFiles(diffText, [issue.path]);
       // 失敗 issue の縮退: その verdict を配列に含めない → applyVerdicts が自動的に
       // unverified にする。runAgentSafe に null フォールバックを渡し、後段でフィルタする。
@@ -514,7 +538,7 @@ export async function llmVerifyIssues(
             reason: string;
           }>(
             {
-              system: verifySystem(),
+              system: verifySystem(config),
               user: verifyUser({ issue, summary, diffText: issueDiff }),
               model,
               schema: VERDICT_SCHEMA,
@@ -607,6 +631,7 @@ export async function llmCommentBodies(
   const debug = deps.debug;
   const costSink = deps.costSink;
   const progress = deps.progress;
+  const { light: modelLight } = resolveModels(deps.config);
 
   const inlineable = final.issues.filter((i) => i.resolved);
   const deferred = final.issues.filter((i) => !i.resolved);
@@ -629,7 +654,7 @@ export async function llmCommentBodies(
         {
           system: commentBodiesSystem(),
           user: commentBodiesUser({ inlineable, deferred }),
-          model: MODEL_LIGHT,
+          model: modelLight,
           schema: COMMENT_BODIES_SCHEMA,
           abortController: deps.abortController,
         },

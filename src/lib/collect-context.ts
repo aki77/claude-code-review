@@ -11,6 +11,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { glob } from "node:fs/promises";
 import path from "node:path";
+import { num, type ResolvedConfig } from "./config.ts";
 import { execFileAsync } from "./exec.ts";
 import type {
   Assignment,
@@ -58,10 +59,8 @@ export const DEFAULT_EXCLUDE_GLOBS = [
 // （プロンプトは規模判定ロジックを一切持たず tier の値を読むだけ）。
 // totalFiles / totalChangedLines はいずれも「レビュー対象（kept）ファイル」基準。
 // 環境変数で上書き可能（利用リポジトリごとにプロンプト改変なしで調整できる）。
-function num(v: string | undefined, fallback: number): number {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : fallback;
-}
+// num() は config.ts へ移設済み（config.ts の resolveConfig と単一の情報源にするため）。
+// この2定数は classifyTier() の thresholds 省略時（no-arg 呼び出し）のフォールバックとして残す。
 const SMALL_MAX_FILES = num(process.env.CODE_REVIEW_SMALL_MAX_FILES, 5);
 const SMALL_MAX_LINES = num(process.env.CODE_REVIEW_SMALL_MAX_LINES, 150);
 
@@ -77,14 +76,28 @@ const OVERSIZED_MAX_LINES = num(
   1000,
 );
 
+// classifyTier の thresholds 省略時（no-arg 呼び出し）のフォールバック既定値。
+const DEFAULT_TIER_THRESHOLDS = {
+  smallMaxFiles: SMALL_MAX_FILES,
+  smallMaxLines: SMALL_MAX_LINES,
+} as const;
+
 // 変更規模から tier を決める純粋関数。
 // small は「ファイル数 AND 行数」の両方がしきい値未満のときのみ該当し、
 // どちらか一方でも超えたら normal へ繰り上がる。
+// thresholds 省略時は現行 env/module const（DEFAULT_TIER_THRESHOLDS）にフォールバックする。
 export function classifyTier(
   totalFiles: number,
   totalChangedLines: number,
+  thresholds: {
+    smallMaxFiles: number;
+    smallMaxLines: number;
+  } = DEFAULT_TIER_THRESHOLDS,
 ): Tier {
-  if (totalFiles <= SMALL_MAX_FILES && totalChangedLines < SMALL_MAX_LINES) {
+  if (
+    totalFiles <= thresholds.smallMaxFiles &&
+    totalChangedLines < thresholds.smallMaxLines
+  ) {
     return "small";
   }
   return "normal";
@@ -727,7 +740,10 @@ const noopDispose = (): void => {};
 
 export async function collectContext(
   opts: CollectContextOpts,
-  { exec = execFileAsync }: { exec?: Exec } = {},
+  {
+    exec = execFileAsync,
+    config,
+  }: { exec?: Exec; config?: ResolvedConfig } = {},
 ): Promise<CollectContextResult> {
   let range: string | undefined;
   let rawFiles: string[];
@@ -794,7 +810,7 @@ export async function collectContext(
     const { changedFiles, oversizedFiles } = splitOversized(
       keptFiles,
       lineStats.perFile,
-      OVERSIZED_MAX_LINES,
+      config?.thresholds.oversizedMaxLines ?? OVERSIZED_MAX_LINES,
     );
 
     const rules = await collectRules(changedFiles);
@@ -825,7 +841,11 @@ export async function collectContext(
       totalDeleted,
       totalChangedLines: totalAdded + totalDeleted,
     };
-    const tier = classifyTier(metrics.totalFiles, metrics.totalChangedLines);
+    const tier = classifyTier(
+      metrics.totalFiles,
+      metrics.totalChangedLines,
+      config?.thresholds,
+    );
 
     // tier に応じてルール準拠エージェントの割り当てを縮退させる
     // （small は buckets[1] を空にして2体目の起動を抑止する）。

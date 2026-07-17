@@ -1,0 +1,107 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/aki77/claude-code-review/main/schema/review.schema.json",
+  "title": ".claude/review.yaml",
+  "description": "claude-code-review のプロジェクト設定ファイル。全キー任意。優先順位は env > YAML > 既定。",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "models": {
+      "type": "object",
+      "description": "レビューエージェントに使うモデルエイリアス。",
+      "additionalProperties": false,
+      "properties": {
+        "light": {
+          "type": "string",
+          "description": "agent1/2/5・rule 検証で使う軽量モデル（既定: sonnet）。CODE_REVIEW_MODEL_LIGHT で上書き可能。"
+        },
+        "heavy": {
+          "type": "string",
+          "description": "agent3/4・bug 検証で使う高性能モデル（既定: sonnet）。CODE_REVIEW_MODEL_HEAVY で上書き可能。"
+        }
+      }
+    },
+    "thresholds": {
+      "type": "object",
+      "description": "変更規模 tier のしきい値。",
+      "additionalProperties": false,
+      "properties": {
+        "smallMaxFiles": {
+          "type": "number",
+          "description": "small tier とみなす最大ファイル数（既定: 5）。CODE_REVIEW_SMALL_MAX_FILES で上書き可能。"
+        },
+        "smallMaxLines": {
+          "type": "number",
+          "description": "small tier とみなす最大変更行数（既定: 150）。CODE_REVIEW_SMALL_MAX_LINES で上書き可能。"
+        },
+        "oversizedMaxLines": {
+          "type": "number",
+          "description": "1ファイルの変更行数がこれを超えたらレビュー対象から除外する（既定: 1000）。CODE_REVIEW_OVERSIZED_MAX_LINES で上書き可能。"
+        }
+      }
+    },
+    "tools": {
+      "type": "object",
+      "description": "レビュー系エージェントに許可する外部参照ツール。",
+      "additionalProperties": false,
+      "properties": {
+        "context7": {
+          "type": "boolean",
+          "description": "context7 MCP（依存ライブラリの実仕様確認用）を有効にするか（既定: true）。CODE_REVIEW_DISABLE_CONTEXT7 で無効化可能（極性が逆点に注意）。"
+        },
+        "web": {
+          "type": "boolean",
+          "description": "WebFetch/WebSearch を有効にするか（既定: false）。CODE_REVIEW_ENABLE_WEB で上書き可能。"
+        }
+      }
+    },
+    "prompts": {
+      "type": "object",
+      "description": "プロンプト断片のカスタマイズ。",
+      "additionalProperties": false,
+      "properties": {
+        "falsePositiveExclusions": {
+          "description": "検証ステップ（step6）の誤検知除外リストに追記/置換する文言。",
+          "oneOf": [
+            {
+              "type": "string",
+              "description": "インライン文字列。既定文言へ追記（append）される。"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["text"],
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "インライン文字列。"
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": ["append", "replace"],
+                  "description": "既定: append（追記）。replace で完全に差し替える。"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["file"],
+              "properties": {
+                "file": {
+                  "type": "string",
+                  "description": "プロジェクト相対のファイルパス（.md 等）。"
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": ["append", "replace"],
+                  "description": "既定: append（追記）。replace で完全に差し替える。"
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

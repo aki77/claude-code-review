@@ -13,6 +13,7 @@ import {
   type CollectContextOpts,
   collectContext,
 } from "./lib/collect-context.ts";
+import { loadConfig, type ResolvedConfig } from "./lib/config.ts";
 import { buildDiffArgs } from "./lib/diff-anchor.ts";
 import { execFileAsync } from "./lib/exec.ts";
 import { mergeFindings } from "./lib/merge-findings.ts";
@@ -59,6 +60,9 @@ export interface PipelineDeps {
   query?: QueryFn;
   // 既定: fs.readFileSync、例外→null。
   readFile?: (relPath: string) => string | null;
+  // テスト DI 用。省略時は runLocalReview/runPrReview が readFile 解決直後に
+  // loadConfig({ readFile }) を呼んで解決する（.claude/review.yaml + env）。
+  config?: ResolvedConfig;
 }
 
 export interface PipelineResult {
@@ -89,13 +93,14 @@ async function runReviewCore(
   authorInfo: string,
   skipSummaryAgent: boolean,
   deps: Required<Pick<PipelineDeps, "exec" | "readFile">> &
-    Pick<PipelineDeps, "query"> & {
+    Pick<PipelineDeps, "query" | "config"> & {
       debug: DebugSink;
       progress: ProgressReporter;
       abortController?: AbortController;
     },
 ): Promise<{ final: FinalDoc; totalCostUsd: number }> {
-  const { exec, query, readFile, debug, progress, abortController } = deps;
+  const { exec, query, readFile, debug, progress, abortController, config } =
+    deps;
 
   // 実行全体のコスト集計。モデルIDごとに ModelUsage を加算し、debug("cost-summary", ...) で
   // final の直後に出力する（SDK の result.modelUsage をそのまま集計するため、モデル混在時も
@@ -134,6 +139,7 @@ async function runReviewCore(
     costSink,
     progress,
     abortController,
+    config,
   };
 
   // diff 取得（統一 diff。以降の全ステップがこの diff を使う）。workspace モードでは
@@ -300,6 +306,7 @@ export async function runLocalReview(
   const boundExec = bindExecSignal(exec, runOpts.abortController?.signal);
   const query = deps.query;
   const readFile = deps.readFile ?? defaultReadFile;
+  const config = deps.config ?? loadConfig({ readFile });
   const debugEntries: DebugEntry[] = [];
   const debug = makeDebugSink(runOpts.debug, debugEntries);
   const progress = makeProgressReporter({
@@ -311,7 +318,7 @@ export async function runLocalReview(
   let dispose: () => void = () => {};
   try {
     progress.startStep("コンテキスト収集");
-    const collected = await collectContext(opts, { exec: boundExec });
+    const collected = await collectContext(opts, { exec: boundExec, config });
     const { context: ctx } = collected;
     dispose = collected.dispose;
     debug("ctx", ctx);
@@ -343,6 +350,7 @@ export async function runLocalReview(
       debug,
       progress,
       abortController: runOpts.abortController,
+      config,
     });
     totalCostUsd = result.totalCostUsd;
 
@@ -370,6 +378,7 @@ export async function runPrReview(
   const boundExec = bindExecSignal(exec, runOpts.abortController?.signal);
   const query = deps.query;
   const readFile = deps.readFile ?? defaultReadFile;
+  const config = deps.config ?? loadConfig({ readFile });
   const debugEntries: DebugEntry[] = [];
   const debug = makeDebugSink(runOpts.debug, debugEntries);
   const progress = makeProgressReporter({
@@ -395,7 +404,7 @@ export async function runPrReview(
         pr,
         baseRef: { baseRefOid: meta.baseRefOid, baseRefName: meta.baseRefName },
       },
-      { exec: boundExec },
+      { exec: boundExec, config },
     );
     const { context: ctx } = collected;
     dispose = collected.dispose;
@@ -415,6 +424,7 @@ export async function runPrReview(
       debug,
       progress,
       abortController: runOpts.abortController,
+      config,
     });
     totalCostUsd = result.totalCostUsd;
     const { final } = result;
@@ -433,7 +443,13 @@ export async function runPrReview(
     const postInput = await llmCommentBodies(
       final,
       { prHeadSha: meta.headRefOid, nameWithOwner },
-      { query, debug, progress, abortController: runOpts.abortController },
+      {
+        query,
+        debug,
+        progress,
+        abortController: runOpts.abortController,
+        config,
+      },
     );
     debug("postInput", postInput);
     if (final.issues.filter((i) => i.resolved).length > 0) {

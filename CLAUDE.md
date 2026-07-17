@@ -36,6 +36,15 @@ pnpm format  # biome check --write（自動修正）
   write 系ツールは一切許可しない
   （作業ツリーを変更しない）。ツール利用がある分レビュー再実行の決定論性は下がるが、これは
   意図した方針判断（ユーザーが精度優先を明言）。
+- **設定解決は `src/lib/config.ts` に集約し、消費側は `ResolvedConfig` を引数で受ける**
+  （トップレベル env 即時評価を新規に増やさない）。優先順位は `env > YAML(.claude/review.yaml)
+  > 既定`。`loadConfig()` は `pipeline.ts` の入口（`runLocalReview`/`runPrReview`）で1回だけ
+  呼び、`collectContext`/`runReviewCore`/各 LLM ステップの `StepDeps.config` へ配線する。
+  各消費関数は `config?` を省略可能にし、省略時は既存の env/module const フォールバックへ
+  倒す（既存の no-arg 呼び出し・env ベースのテストを壊さない）。
+- **プロンプト断片の file 読込・合成（inline/file/append/replace）は `config.ts` で解決済みの
+  文字列にしてから `prompts.ts` へ渡す**（`prompts.ts` は副作用なし・ファイル I/O なしの
+  純関数を維持する設計原則を守る）。
 
 ## 認証方針（重要な制約）
 

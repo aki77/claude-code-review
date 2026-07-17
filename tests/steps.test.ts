@@ -1,5 +1,6 @@
 import { AbortError } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, it } from "vitest";
+import { DEFAULT_CONFIG } from "../src/lib/config.ts";
 import type {
   Context,
   FinalDoc,
@@ -69,6 +70,22 @@ describe("llmSummaryAndClusters", () => {
     );
     expect(result.summary).toBeNull();
     expect(result.rawClusters).toEqual([]);
+  });
+
+  it("deps.config.models.light を渡すと runStructured の model がそれで上書きされる", async () => {
+    const calls: { prompt: unknown; options: unknown }[] = [];
+    const query = makeFakeQuery({ summary: "サマリ本文" }, { calls });
+    await llmSummaryAndClusters(
+      baseCtx({ tier: "small" }),
+      "diff",
+      "author-info",
+      {
+        query,
+        config: { ...DEFAULT_CONFIG, models: { light: "opus", heavy: "opus" } },
+      },
+    );
+    const options = calls[0]?.options as { model?: string } | undefined;
+    expect(options?.model).toBe("opus");
   });
 });
 
