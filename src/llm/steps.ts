@@ -564,6 +564,12 @@ export async function llmVerifyIssues(
     debug,
   };
 
+  // issue ごとに同一の system プロンプトを生成し直すのは無駄な上、debug 出力すると
+  // 重複するため、ループ外で1回だけ計算して使い回す。除外条件（falsePositiveExclusions）が
+  // 実際にプロンプトへ埋め込まれたかを目視確認できるよう、ここで1回 debug 出力する。
+  const verifySystemText = verifySystem(config);
+  debug?.("verify:system", { system: verifySystemText });
+
   progress?.startStep("検証", issues.length);
   const results = await Promise.all(
     issues.map(async (issue) => {
@@ -582,7 +588,7 @@ export async function llmVerifyIssues(
             reason: string;
           }>(
             {
-              system: verifySystem(config),
+              system: verifySystemText,
               user: verifyUser({ issue, summary, diffText: issueDiff }),
               model,
               schema: VERDICT_SCHEMA,

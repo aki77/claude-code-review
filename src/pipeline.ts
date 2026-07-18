@@ -13,7 +13,7 @@ import {
   type CollectContextOpts,
   collectContext,
 } from "./lib/collect-context.ts";
-import { loadConfig, type ResolvedConfig } from "./lib/config.ts";
+import { loadConfigWithSource, type ResolvedConfig } from "./lib/config.ts";
 import { buildDiffArgs } from "./lib/diff-anchor.ts";
 import { execFileAsync } from "./lib/exec.ts";
 import { mergeFindings } from "./lib/merge-findings.ts";
@@ -296,6 +296,24 @@ function makeDebugSink(enabled: boolean, entries: DebugEntry[]): DebugSink {
     : () => {};
 }
 
+// config を解決し、解決値（config）と「どの設定ファイルが読まれたか」（config:source）を
+// debug 出力する。runLocalReview/runPrReview 共通処理を1箇所に集約する（両者で同一だった
+// ため）。deps.config が注入されている場合は探索済みとみなし readFile を再走査しない
+// （sourcePath は不明なので null）。config:source は debug 確認用の別ラベル出力で、
+// ResolvedConfig 自体には含めない（config-schema.test.ts の型⇔スキーマ一致を壊さないため）。
+function resolveConfigWithDebug(
+  deps: { config?: ResolvedConfig; readFile?: ReadFileFn },
+  readFile: ReadFileFn,
+  debug: DebugSink,
+): ResolvedConfig {
+  const { config, sourcePath } = deps.config
+    ? { config: deps.config, sourcePath: null }
+    : loadConfigWithSource({ readFile });
+  debug("config", config);
+  debug("config:source", { path: sourcePath });
+  return config;
+}
+
 export async function runLocalReview(
   opts: CollectContextOpts,
   runOpts: {
@@ -311,9 +329,9 @@ export async function runLocalReview(
   const boundExec = bindExecSignal(exec, runOpts.abortController?.signal);
   const query = deps.query;
   const readFile = deps.readFile ?? defaultReadFile;
-  const config = deps.config ?? loadConfig({ readFile });
   const debugEntries: DebugEntry[] = [];
   const debug = makeDebugSink(runOpts.debug, debugEntries);
+  const config = resolveConfigWithDebug(deps, readFile, debug);
   const progress = makeProgressReporter({
     quiet: runOpts.quiet ?? false,
     debug: runOpts.debug,
@@ -383,9 +401,9 @@ export async function runPrReview(
   const boundExec = bindExecSignal(exec, runOpts.abortController?.signal);
   const query = deps.query;
   const readFile = deps.readFile ?? defaultReadFile;
-  const config = deps.config ?? loadConfig({ readFile });
   const debugEntries: DebugEntry[] = [];
   const debug = makeDebugSink(runOpts.debug, debugEntries);
+  const config = resolveConfigWithDebug(deps, readFile, debug);
   const progress = makeProgressReporter({
     quiet: runOpts.quiet ?? false,
     debug: runOpts.debug,

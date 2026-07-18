@@ -17,6 +17,11 @@ import type { ReadFileFn } from "./types.ts";
 
 export const CONFIG_PATH = ".claude/review.yaml";
 
+// 探索順リスト。既存テストは CONFIG_PATH（.yaml）で readFile をマッチしているため、
+// 後方互換のため .yaml を第一候補に残す。.yml は「拡張子違いによる設定未読込」を防ぐための
+// 追加候補（loadConfig 参照）。
+export const CONFIG_PATHS = [CONFIG_PATH, ".claude/review.yml"] as const;
+
 // ---- 誤検知除外リスト（元プラグイン shared/review-core.md 由来） -------------
 // 元プラグインはステップ3・6の両方に適用していたが、本再実装では検証(step6)にのみ
 // 集約する: 発見段階（agent1-5）は幅広く拾い、確度の担保は検証エージェントが
@@ -244,21 +249,24 @@ export function resolvePromptFragment(
 
 // ---- YAML → RawConfig（欠落・パースエラーは null） ---------------------------
 
-function parseRawConfig(yamlText: string | null): RawConfig | null {
+function parseRawConfig(
+  yamlText: string | null,
+  sourcePath: string,
+): RawConfig | null {
   if (yamlText === null) return null;
   try {
     const parsed = parseYaml(yamlText);
     if (parsed === null || parsed === undefined) return {};
     if (typeof parsed !== "object" || Array.isArray(parsed)) {
       warn(
-        `${CONFIG_PATH} のトップレベルは object を期待しましたが不正な形式でした。既定値にフォールバックします`,
+        `${sourcePath} のトップレベルは object を期待しましたが不正な形式でした。既定値にフォールバックします`,
       );
       return null;
     }
     return parsed as RawConfig;
   } catch (error) {
     warn(
-      `${CONFIG_PATH} の YAML パースに失敗しました。既定値にフォールバックします: ${
+      `${sourcePath} の YAML パースに失敗しました。既定値にフォールバックします: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -369,14 +377,40 @@ export function resolveConfig(
   };
 }
 
-// pipeline が1回だけ呼ぶ入口。.claude/review.yaml を readFile 経由で読み、
-// resolveConfig へ渡す。readFile が例外を投げず null を返す前提（ReadFileFn の契約）。
+// CONFIG_PATHS を先頭（.yaml）から順に探索し、readFile が非 null を返した最初のパスと
+// その内容を返す。どちらも null なら { path: null, content: null }。
+// loadConfigWithSource 内部の探索ヘルパー。
+function findConfigSource(readFile: ReadFileFn): {
+  path: string | null;
+  content: string | null;
+} {
+  for (const path of CONFIG_PATHS) {
+    const content = readFile(path);
+    if (content !== null) return { path, content };
+  }
+  return { path: null, content: null };
+}
+
+// pipeline が1回だけ呼ぶ入口。CONFIG_PATHS を探索して見つかった設定ファイルを解決し、
+// 解決後の config と「どの設定ファイルが読まれたか」（sourcePath。見つからなければ null）を
+// 併せて返す。sourcePath は debug 出力専用で、ResolvedConfig 自体には含めない
+// （ResolvedConfig は config-schema.test.ts で YAML スキーマとキー集合一致を検証しており、
+// debug 専用の内部情報を混ぜて型を汚さないため）。探索は1回だけ行い、config と sourcePath の
+// 両方を1回の readFile 走査から得る（pipeline 側で再探索しない）。
+export function loadConfigWithSource(
+  opts: { env?: NodeJS.ProcessEnv; readFile?: ReadFileFn } = {},
+): { config: ResolvedConfig; sourcePath: string | null } {
+  const env = opts.env ?? process.env;
+  const readFile = opts.readFile ?? (() => null);
+
+  const { path, content } = findConfigSource(readFile);
+  const raw = parseRawConfig(content, path ?? CONFIG_PATH);
+  return { config: resolveConfig(raw, env, readFile), sourcePath: path };
+}
+
+// ResolvedConfig のみを返す薄いラッパー（sourcePath 不要の呼び出し・既存テスト向け）。
 export function loadConfig(
   opts: { env?: NodeJS.ProcessEnv; readFile?: ReadFileFn } = {},
 ): ResolvedConfig {
-  const env = opts.env ?? process.env;
-  const readFile = opts.readFile ?? (() => null);
-  const yamlText = readFile(CONFIG_PATH);
-  const raw = parseRawConfig(yamlText);
-  return resolveConfig(raw, env, readFile);
+  return loadConfigWithSource(opts).config;
 }

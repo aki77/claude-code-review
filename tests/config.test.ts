@@ -3,6 +3,7 @@ import { BACKGROUND_MAX_CHARS } from "../src/lib/background.ts";
 import {
   DEFAULT_CONFIG,
   loadConfig,
+  loadConfigWithSource,
   resolveConfig,
   resolvePromptFragment,
 } from "../src/lib/config.ts";
@@ -68,6 +69,63 @@ describe("loadConfig", () => {
           : null,
     });
     expect(config.models).toEqual({ light: "haiku", heavy: "opus" });
+  });
+
+  it(".claude/review.yaml が無く .yml のみ存在する場合、.yml が読み込まれる", () => {
+    const config = loadConfig({
+      env: {},
+      readFile: (p) =>
+        p === ".claude/review.yml"
+          ? "models:\n  light: haiku\n  heavy: opus\n"
+          : null,
+    });
+    expect(config.models).toEqual({ light: "haiku", heavy: "opus" });
+  });
+
+  it(".yaml と .yml が両方存在する場合、.yaml が優先して読み込まれる", () => {
+    const files: Record<string, string> = {
+      ".claude/review.yaml": "models:\n  light: haiku\n",
+      ".claude/review.yml": "models:\n  light: opus\n",
+    };
+    const config = loadConfig({
+      env: {},
+      readFile: (p) => files[p] ?? null,
+    });
+    expect(config.models.light).toBe("haiku");
+  });
+
+  describe("loadConfigWithSource", () => {
+    it(".yaml を優先し sourcePath に .yaml を返す", () => {
+      const files: Record<string, string> = {
+        ".claude/review.yaml": "models:\n  light: haiku\n",
+        ".claude/review.yml": "models:\n  light: opus\n",
+      };
+      const { config, sourcePath } = loadConfigWithSource({
+        env: {},
+        readFile: (p) => files[p] ?? null,
+      });
+      expect(config.models.light).toBe("haiku");
+      expect(sourcePath).toBe(".claude/review.yaml");
+    });
+
+    it(".yaml が無ければ .yml を読み sourcePath に .yml を返す", () => {
+      const { config, sourcePath } = loadConfigWithSource({
+        env: {},
+        readFile: (p) =>
+          p === ".claude/review.yml" ? "models:\n  light: haiku\n" : null,
+      });
+      expect(config.models.light).toBe("haiku");
+      expect(sourcePath).toBe(".claude/review.yml");
+    });
+
+    it("どちらも無ければ sourcePath は null（既定値で解決される）", () => {
+      const { config, sourcePath } = loadConfigWithSource({
+        env: {},
+        readFile: () => null,
+      });
+      expect(config).toEqual(DEFAULT_CONFIG);
+      expect(sourcePath).toBeNull();
+    });
   });
 
   it("env が YAML より優先される", () => {

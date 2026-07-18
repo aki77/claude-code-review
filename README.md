@@ -82,6 +82,10 @@ code-review pr <number> [--comment] [--background <text>] [--background-file <pa
   この影響を受けず、従来どおり `2`（中断時は `130`）のまま返る。GitHub Actions で
   「指摘ありは成功扱い・エラー時のみステップ失敗」にしたい場合に使う（後述）。
 - `--debug`: 各 LLM ステップの usage・コストなどをデバッグログとして標準エラーに出力する。
+  解決後の設定値（`config`）とどの設定ファイルが読まれたか（`config:source`。
+  `.claude/review.yaml`/`.yml` のどちらか、またはどちらも見つからず既定値のみか）、
+  検証ステップ（step6）に実際に渡された system プロンプト本文（`verify:system`。
+  `falsePositiveExclusions` の解決結果が埋め込まれているか確認できる）も出力する。
 
 開発時（ビルドせず直接実行）:
 
@@ -273,6 +277,11 @@ jobs:
 「プロジェクト単位の恒久設定」という位置づけ。`.claude/review.yaml` が無い場合は
 全キーが既定値（env が設定されていればそちらが優先）で動く。YAML のパースに失敗した
 場合も、レビュー自体は止めずに警告を出して既定値にフォールバックする。
+
+設定ファイルは `.claude/review.yaml` と `.claude/review.yml` の両方の拡張子に対応する
+（`.yaml` を優先探索し、両方存在する場合は `.yaml` が採用される）。実際にどちらが
+読まれたか（あるいはどちらも見つからず既定値のみで動いているか）は `--debug` の
+`config:source` 出力で確認できる。
 
 ### YAML の全キー
 
