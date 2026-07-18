@@ -7,7 +7,7 @@
 // ruleRefs（和集合）は**すべてスクリプトが機械転写**し、LLM を経由させない（転記ミス防止）。
 // category/severity は process-findings のグループ集約規則で確定済みの値をそのままコピーする
 // （kind と同じ扱い。LLM の統合文章 title/body とは独立）。
-import { stuffedJsonFieldNames } from "./llm-output-guard.ts";
+import { stuffedJsonFieldNames, unstuffTitleBody } from "./llm-output-guard.ts";
 import type { FindingsDoc, Issue, IssuesDoc, MergeText } from "./types.ts";
 
 // findingsDoc（FINDINGS の中身）と mergeTexts（LLM 統合文章配列）から ISSUES を組み立てる純粋関数。
@@ -63,14 +63,29 @@ export function mergeFindings(
         `groupId=${groupId} の統合文章は title/body（非空文字列）が必要です`,
       );
     }
+    // LLM が title/body いずれかに { title, body } JSON を丸ごと詰め込む出力異常
+    // （LLM出力異常）を検知した場合、throw せず unstuff して機械的に救済する
+    // （「検知はできるが救済せずレビュー全体を落とす」を避けるための方針転換）。
     const stuffedFields = stuffedJsonFieldNames(title, body);
-    if (stuffedFields.length > 0) {
+    const restored = unstuffTitleBody(
+      title,
+      body,
+      stuffedFields.includes("title"),
+      stuffedFields.includes("body"),
+    );
+    // unstuff 後も非空不変条件が保たれているか再検証する。生値の非空チェックは
+    // unstuff 前にしか効かず、救済の結果 title/body が空になる病的な入力
+    // （内側が空文字列のみ等）を静かに素通しさせないため。
+    if (restored.title.trim() === "" || restored.body.trim() === "") {
       throw new Error(
-        `groupId=${groupId} の統合文章の ${stuffedFields.join("/")} に ` +
-          "title/body を含む JSON 構造が丸ごと格納されている疑いがある（LLM出力異常）",
+        `groupId=${groupId} の統合文章は unstuff 後に title/body が空になりました`,
       );
     }
-    textByGroup.set(groupId, { groupId, title, body });
+    textByGroup.set(groupId, {
+      groupId,
+      title: restored.title,
+      body: restored.body,
+    });
   }
   // needsMergeText:true の全グループに文章が供給されているか。
   for (const gid of needTextGroups) {

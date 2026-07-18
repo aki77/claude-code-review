@@ -167,12 +167,26 @@ describe("mergeFindings", () => {
     ).toThrow(/title\/body/);
   });
 
-  it("エラー: title に title/body を含む JSON 構造が丸ごと入っている", () => {
-    expect(() =>
-      mergeFindings(doc, [
-        { groupId: "g1", title: '{"title":"X","body":"Y"}', body: "正常" },
-      ]),
-    ).toThrow(/JSON 構造/);
+  it("title に title/body を含む JSON 構造が丸ごと入っている場合は throw せず unstuff して救済する", () => {
+    const { issues } = mergeFindings(doc, [
+      { groupId: "g1", title: '{"title":"X","body":"Y"}', body: "正常" },
+    ]);
+    const g1 = issues.find((i) => i.id === "g1")!;
+    expect(g1.title).toBe("X");
+    expect(g1.body).toBe("Y");
+  });
+
+  it("body に title/body を含む JSON 構造が丸ごと入っている場合も救済する（発生例: title は無意味な固定文言）", () => {
+    const { issues } = mergeFindings(doc, [
+      {
+        groupId: "g1",
+        title: "統合レビュー結果",
+        body: '{"title":"実際のタイトル","body":"実際の本文"}',
+      },
+    ]);
+    const g1 = issues.find((i) => i.id === "g1")!;
+    expect(g1.title).toBe("実際のタイトル");
+    expect(g1.body).toBe("実際の本文");
   });
 
   it("エラー: stdin が配列でない", () => {

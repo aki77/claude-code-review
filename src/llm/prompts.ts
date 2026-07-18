@@ -235,9 +235,13 @@ const NO_CONTEXT_NOTE = "（参照コンテキストなし）";
 // finding 出力（FINDINGS_OUTPUT_INSTRUCTION）と統合文章（mergeTextUser）の両方で使う。
 // looksLikeStuffedJson（llm-output-guard.ts）が title/body を対称に検知する実装と揃える
 // ため、この 1 箇所を単一の情報源にして両ステップの文言を同期させる。
+// 統合（merge）ステップにしか当てはまらない前提（「統合後の説明文」等）はここに書かず、
+// mergeTextUser 側に置く（個別 finding 生成側へ誤った前提を配信しないため）。
 const TITLE_BODY_NO_STUFFING_INSTRUCTION =
   "title と body は必ず別々の文字列で出力し、title・body いずれのフィールドにも" +
-  "JSON 構造（title/body を含むオブジェクトなど）を入れ子にして詰め込まないこと。";
+  "JSON 構造（title/body を含むオブジェクトなど）を入れ子にして詰め込まないこと。" +
+  "title には指摘内容を要約した具体的な一文を書き、body にはその説明文を" +
+  "プレーンテキストで書くこと。`{` から書き始めることは禁止する。";
 
 // FINDINGS_SCHEMA が { findings: Finding[] } でラップされている（Anthropic API の
 // json_schema 出力はトップレベルが object である制約のため）ことを全レビューエージェントの
@@ -513,7 +517,9 @@ export function mergeTextUser({
     .join("\n\n");
   return (
     "以下の複数の指摘を1件に統合し、title と body を返してください。" +
-    `${TITLE_BODY_NO_STUFFING_INSTRUCTION}\n\n` +
+    `${TITLE_BODY_NO_STUFFING_INSTRUCTION}` +
+    "body には統合後の説明文そのものを書き、「統合レビュー結果」のような無意味な" +
+    "固定文言にしないこと。\n\n" +
     list
   );
 }

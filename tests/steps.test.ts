@@ -453,6 +453,23 @@ describe("llmMergeTexts", () => {
     const result = await llmMergeTexts(doc, { query });
     expect(result).toEqual([{ groupId: "g1", title: "t1", body: "b1" }]);
   });
+
+  it("body に title/body を含む JSON が丸ごと詰め込まれた出力は unstuff して救済し、debug ログを出す", async () => {
+    const query = makeFakeQuery({
+      title: "統合レビュー結果",
+      body: '{"title":"実際のタイトル","body":"実際の本文"}',
+    });
+    const debugCalls: { label: string; obj: unknown }[] = [];
+    const debug = (label: string, obj: unknown) => {
+      debugCalls.push({ label, obj });
+    };
+    const doc = findingsDocWithGroup(true);
+    const result = await llmMergeTexts(doc, { query, debug });
+    expect(result).toEqual([
+      { groupId: "g1", title: "実際のタイトル", body: "実際の本文" },
+    ]);
+    expect(debugCalls.some((c) => c.label === "merge:unstuffed")).toBe(true);
+  });
 });
 
 describe("retryUnresolvedAnchors", () => {

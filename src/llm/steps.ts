@@ -11,6 +11,10 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 import { abortErrorKind, elapsedMs, isAbortError } from "../lib/abort.ts";
 import type { ResolvedConfig } from "../lib/config.ts";
+import {
+  stuffedJsonFieldNames,
+  unstuffTitleBody,
+} from "../lib/llm-output-guard.ts";
 import type { ProgressReporter } from "../lib/progress.ts";
 import type {
   Assignment,
@@ -449,10 +453,33 @@ export async function llmMergeTexts(
         costSink,
         progress,
       );
+      // LLM が title/body いずれかに { title, body } JSON を丸ごと詰め込む出力異常を
+      // merge-findings.ts に渡る前にこの時点で救済する（merge-findings.ts 側の救済は
+      // 二重の安全網）。復元が起きた場合は多発状況の可観測性のため debug ログを出す。
+      const stuffedFields = stuffedJsonFieldNames(text.title, text.body);
+      const restored = unstuffTitleBody(
+        text.title,
+        text.body,
+        stuffedFields.includes("title"),
+        stuffedFields.includes("body"),
+      );
+      if (stuffedFields.length > 0) {
+        debug?.("merge:unstuffed", {
+          groupId: group.id,
+          fields: stuffedFields,
+        });
+      }
+      // 救済の結果 title/body が空になった病的な入力では、先頭メンバー finding の
+      // 値（fallback）に倒して非空を保つ（空のまま merge-findings.ts へ渡すと
+      // そこで throw されレビュー全体が落ちるため、この時点で縮退させる）。
+      const finalTitle =
+        restored.title.trim() === "" ? fallback.title : restored.title;
+      const finalBody =
+        restored.body.trim() === "" ? fallback.body : restored.body;
       return {
         groupId: group.id,
-        title: text.title,
-        body: text.body,
+        title: finalTitle,
+        body: finalBody,
       } satisfies MergeText;
     }),
   );
