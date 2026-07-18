@@ -26,7 +26,13 @@ import {
 } from "./lib/pr-meta.ts";
 import { processFindings } from "./lib/process-findings.ts";
 import { makeProgressReporter, type ProgressReporter } from "./lib/progress.ts";
-import type { Context, DebugEntry, FinalDoc, ReadFileFn } from "./lib/types.ts";
+import type {
+  Context,
+  DebugEntry,
+  DebugSink,
+  FinalDoc,
+  ReadFileFn,
+} from "./lib/types.ts";
 import {
   tierReducedClusters,
   validateClusters,
@@ -35,7 +41,6 @@ import { mergeEnv } from "./lib/workspace-index.ts";
 import type { QueryFn } from "./llm/client.ts";
 import {
   type CostSink,
-  type DebugSink,
   defaultReadFile,
   llmCommentBodies,
   llmMergeTexts,

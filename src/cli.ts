@@ -11,7 +11,7 @@
  * 実装ロジック（git/gh 呼び出し・LLM・レビュー処理）はここには書かない
  * （src/pipeline.ts / src/report.ts に委譲する）。
  */
-import { isAbortError } from "./lib/abort.ts";
+import { elapsedMs, isAbortError } from "./lib/abort.ts";
 import { runLocalReview, runPrReview } from "./pipeline.ts";
 import { printSummary, writeSummaryFile } from "./report.ts";
 
@@ -342,13 +342,38 @@ async function dispatch(
 // SIGINT を受けて協調的キャンセルを行う。1回目は abortController.abort() で実行中の
 // query()/execFile を止め、各ステップの後始末（progress.done() 等）を通常の finally 経路に
 // 任せる。2回目（1回目の abort がまだ効いていない間に再度押された場合）は強制 exit(130)。
-function installSigintHandler(abortController: AbortController): void {
+//
+// debug: true のときのみ、abort ライフサイクル切り分け用の診断ログを stderr に出す
+// （仮説A: ハンドラ未発火／仮説A′: abort が signal に立たない、の切り分け用。
+// .claude/plans/ctrl-c-dapper-cascade.md 参照。原因確定後に撤去予定の一時ログ）。
+function installSigintHandler(
+  abortController: AbortController,
+  debug: boolean,
+): void {
+  const debugLog = (message: string): void => {
+    if (debug) process.stderr.write(`[debug] +${elapsedMs()}ms ${message}\n`);
+  };
+
   let aborted = false;
   process.on("SIGINT", () => {
     if (!aborted) {
       aborted = true;
       process.stderr.write("\n中断しています…（もう一度 Ctrl+C で強制終了）\n");
+      debugLog("sigint: received (count=1)");
       abortController.abort();
+      debugLog(
+        `sigint: abort() called, signal.aborted=${abortController.signal.aborted}`,
+      );
+      return;
+    }
+    // stderr がパイプ先の場合、write は非同期になりうる。書き込み完了を待って
+    // から exit(130) しないと、この診断ログ（強制終了パスの切り分け用）が最も
+    // 欠落しやすい状況で失われる。debug 無効時は同期的にそのまま exit する。
+    if (debug) {
+      process.stderr.write(
+        `[debug] +${elapsedMs()}ms sigint: received (count=2) -> exit(130)\n`,
+        () => process.exit(130),
+      );
       return;
     }
     process.exit(130);
@@ -371,7 +396,7 @@ async function main(): Promise<void> {
   }
 
   const abortController = new AbortController();
-  installSigintHandler(abortController);
+  installSigintHandler(abortController, args.debug);
 
   process.exit(await dispatch(args, abortController));
 }

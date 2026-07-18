@@ -23,7 +23,8 @@ import type {
   NonNullableUsage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import type { JSONSchema } from "../lib/types.ts";
+import { abortErrorKind, elapsedMs } from "../lib/abort.ts";
+import type { DebugSink, JSONSchema } from "../lib/types.ts";
 
 export interface RunStructuredOpts {
   system: string;
@@ -40,6 +41,9 @@ export interface RunStructuredOpts {
   // Ctrl+C 中断伝播用。SDK は AbortController インスタンスを要求する
   // （options.abortController）ため、末端まで AbortController のまま配線する。
   abortController?: AbortController;
+  // 診断用（--debug 時のみ）。query ライフサイクルの時系列ログを出す一時的なフック。
+  // 原因確定後に撤去予定（.claude/plans/ctrl-c-dapper-cascade.md 参照）。
+  debug?: DebugSink;
 }
 
 export interface RunStructuredResult<T> {
@@ -64,21 +68,50 @@ const RETRY_USER_SUFFIX =
  * - subtype が error* → errors を含めた Error を throw（認証失敗の検出ポイント）。
  * - subtype === 'success' → そのメッセージを返す。
  * - result メッセージが得られないままストリームが終わった → Error。
+ *
+ * debug/label/signal は Ctrl+C 中断切り分け用の診断ログ引数（すべて optional）。
+ * 「SDK が abort 後も success で完走する」仮説(B)を確認するのが目的。
+ * 原因確定後に撤去予定（.claude/plans/ctrl-c-dapper-cascade.md 参照）。
  */
 async function runQueryUntilResult(
   queryFn: QueryFn,
   prompt: string,
   options: Parameters<QueryFn>[0]["options"],
+  debug?: DebugSink,
+  label?: string,
+  signal?: AbortSignal,
 ) {
+  debug?.("query:start", { label, at: elapsedMs(), aborted: signal?.aborted });
   for await (const message of queryFn({ prompt, options })) {
+    if (signal?.aborted === true) {
+      // (B) の決定的証拠: abort 済みなのにメッセージ（result 以外も含む）を受信している。
+      debug?.("query:msg-after-abort", {
+        label,
+        at: elapsedMs(),
+        type: message.type,
+        subtype: "subtype" in message ? message.subtype : undefined,
+      });
+    }
     if (message.type !== "result") continue;
     if (message.subtype !== "success") {
       throw new Error(
         `LLM query failed (${message.subtype}): ${message.errors.join(", ")}`,
       );
     }
+    debug?.("query:end", {
+      label,
+      at: elapsedMs(),
+      outcome: "result",
+      subtype: message.subtype,
+      abortedAtEnd: signal?.aborted,
+    });
     return message;
   }
+  debug?.("query:end", {
+    label,
+    at: elapsedMs(),
+    outcome: "stream-ended-no-result",
+  });
   throw new Error("LLM query stream ended without a result message");
 }
 
@@ -108,7 +141,32 @@ export async function runStructured<T>(
       : {}),
   };
 
-  const result = await runQueryUntilResult(queryFn, opts.user, options);
+  const signal = opts.abortController?.signal;
+
+  // runQueryUntilResult の呼び出しを診断ログ付き catch で包む共通ラッパー。
+  // primary/retry の2箇所で label だけ変えて同じ try/catch を書くのを避ける
+  // （診断確定後に撤去予定。.claude/plans/ctrl-c-dapper-cascade.md 参照）。
+  const runLabeled = async (prompt: string, label: "primary" | "retry") => {
+    try {
+      return await runQueryUntilResult(
+        queryFn,
+        prompt,
+        options,
+        opts.debug,
+        label,
+        signal,
+      );
+    } catch (error) {
+      opts.debug?.("query:threw", {
+        label,
+        at: elapsedMs(),
+        ...abortErrorKind(error),
+      });
+      throw error;
+    }
+  };
+
+  const result = await runLabeled(opts.user, "primary");
 
   if (result.structured_output !== undefined) {
     return {
@@ -129,10 +187,9 @@ export async function runStructured<T>(
     };
   } catch {
     // パース失敗時は 1 回だけリトライ。structured_output 経路はここに来ないためリトライ対象外。
-    const retryResult = await runQueryUntilResult(
-      queryFn,
+    const retryResult = await runLabeled(
       `${opts.user}${RETRY_USER_SUFFIX}`,
-      options,
+      "retry",
     );
     const data = JSON.parse(retryResult.result) as T;
     return {

@@ -288,3 +288,8 @@ export interface DebugEntry {
   label: string;
   obj: unknown;
 }
+
+// --debug 時のログ出力関数。`src/llm/steps.ts`（各ステップ）・`src/llm/client.ts`
+// （runStructured）・`src/pipeline.ts`（makeDebugSink が実体を生成）が共有する型のため、
+// 特定レイヤに属させず types.ts に置く。
+export type DebugSink = (label: string, obj: unknown) => void;

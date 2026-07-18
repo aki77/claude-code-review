@@ -9,13 +9,14 @@ import type {
   McpServerConfig,
   ModelUsage,
 } from "@anthropic-ai/claude-agent-sdk";
-import { isAbortError } from "../lib/abort.ts";
+import { abortErrorKind, elapsedMs, isAbortError } from "../lib/abort.ts";
 import type { ResolvedConfig } from "../lib/config.ts";
 import type { ProgressReporter } from "../lib/progress.ts";
 import type {
   Assignment,
   Cluster,
   Context,
+  DebugSink,
   FinalDoc,
   FindingsDoc,
   Issue,
@@ -61,8 +62,6 @@ import {
   verifySystem,
   verifyUser,
 } from "./prompts.ts";
-
-export type DebugSink = (label: string, obj: unknown) => void;
 
 // 実行全体のコスト集計器。runAgentSafe の成功パスで modelUsage を受け取り、
 // 呼び出し側（pipeline.ts）がモデルごとに加算する。
@@ -120,6 +119,7 @@ async function runAgentSafe<T>(
     debug?.(`agent:${label}`, {
       usage: result.usage,
       totalCostUsd: result.totalCostUsd,
+      at: elapsedMs(),
     });
     costSink?.(result.modelUsage);
     return result.data;
@@ -127,10 +127,15 @@ async function runAgentSafe<T>(
     // Ctrl+C 中断由来のエラーは「1エージェント失敗を空 fallback で握り潰す」対象外。
     // 握り潰すと各エージェントが空 findings を返して処理が続行してしまい、中断が効かない。
     if (isAbortError(error)) {
+      debug?.(`agent:${label}:aborted`, {
+        at: elapsedMs(),
+        ...abortErrorKind(error),
+      });
       throw error;
     }
     debug?.(`agent:${label}:failed`, {
       error: error instanceof Error ? error.message : error,
+      at: elapsedMs(),
     });
     return fallback;
   } finally {
@@ -150,6 +155,7 @@ async function runFindingsAgent(
     allowedTools?: string[];
     mcpServers?: Record<string, McpServerConfig>;
     abortController?: AbortController;
+    debug?: DebugSink;
   } = {},
 ): Promise<RunStructuredResult<unknown[]>> {
   const result = await runStructured<{ findings: unknown[] }>(
@@ -194,6 +200,7 @@ export async function llmSummaryAndClusters(
           model: modelLight,
           schema: wantClusters ? SUMMARY_CLUSTERS_SCHEMA : SUMMARY_ONLY_SCHEMA,
           abortController: deps.abortController,
+          debug: deps.debug,
         },
         { query: queryFn },
       );
@@ -263,7 +270,11 @@ export async function llmReviewAgents(
   const config = deps.config;
   const { light: modelLight, heavy: modelHeavy } = resolveModels(config);
   // 全レビュー系エージェント（agent1〜5）共通の allowedTools/mcpServers（＋中断用 abortController）。
-  const reviewOpts = buildReviewOpts(deps.abortController, config);
+  // debug は buildReviewOpts（純関数、prompts.ts）が持たないためここでスプレッド追加する。
+  const reviewOpts = {
+    ...buildReviewOpts(deps.abortController, config),
+    debug,
+  };
 
   const tasks: Promise<unknown[]>[] = [];
 
@@ -427,6 +438,7 @@ export async function llmMergeTexts(
               model: modelLight,
               schema: MERGE_TEXT_SCHEMA,
               abortController: deps.abortController,
+              debug: deps.debug,
             },
             { query: queryFn },
           );
@@ -487,6 +499,7 @@ export async function retryUnresolvedAnchors(
           model: modelLight,
           schema: RETRY_ANCHOR_SCHEMA,
           abortController: deps.abortController,
+          debug: deps.debug,
         },
         { query: queryFn },
       );
@@ -518,7 +531,11 @@ export async function llmVerifyIssues(
   const config = deps.config;
   const { light: modelLight, heavy: modelHeavy } = resolveModels(config);
   // レビュー系ステップ共通の allowedTools/mcpServers（agent1〜5 と同一方針。steps.ts 冒頭参照）。
-  const reviewOpts = buildReviewOpts(deps.abortController, config);
+  // debug は buildReviewOpts（純関数、prompts.ts）が持たないためここでスプレッド追加する。
+  const reviewOpts = {
+    ...buildReviewOpts(deps.abortController, config),
+    debug,
+  };
 
   progress?.startStep("検証", issues.length);
   const results = await Promise.all(
@@ -657,6 +674,7 @@ export async function llmCommentBodies(
           model: modelLight,
           schema: COMMENT_BODIES_SCHEMA,
           abortController: deps.abortController,
+          debug: deps.debug,
         },
         { query: queryFn },
       );
