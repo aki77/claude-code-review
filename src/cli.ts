@@ -50,7 +50,7 @@ Options:
                                  （GitHub Actions の $GITHUB_STEP_SUMMARY 向け。--debug 併用時は
                                  各段の中間成果物を <details> 折りたたみで追記する）
   --no-fail-on-findings         local/pr 共通。confirmed 指摘があっても exit 0 にする
-                                 （本当のエラーは従来どおり非0のまま区別できる）
+                                 （エラー時は exit 2・中断時は 130 のまま区別できる）
   --debug                       デバッグログを出力する
   --quiet, -q                   進捗表示を抑制する
   -h, --help                    このヘルプを表示する
@@ -241,7 +241,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
 }
 
 // runLocalReview/runPrReview 共通のエラー→終了コード変換。abort 由来（Ctrl+C 中断）は
-// 130、それ以外は従来どおり 1 にし、local/pr 双方で同じ分岐をコピーしないようにする。
+// 130、それ以外は例外系として 2 にし、local/pr 双方で同じ分岐をコピーしないようにする。
+//
+// 終了コードの意味: 0=confirmed指摘なし / 1=confirmed指摘あり（唯一の「1」）/
+// 2=レビュー自体の失敗（例外）・引数エラー / 130=Ctrl+C中断。
 function reportError(error: unknown): number {
   if (isAbortError(error)) {
     process.stderr.write("中断されました\n");
@@ -249,7 +252,7 @@ function reportError(error: unknown): number {
   }
   const message = error instanceof Error ? error.message : String(error);
   process.stderr.write(`error: ${message}\n`);
-  return 1;
+  return 2;
 }
 
 // confirmed 指摘 → exit code の判定（local/pr 共通、--no-fail-on-findings で 0 に上書き）。
@@ -331,7 +334,9 @@ async function dispatch(
     }
   }
 
-  return 1;
+  // parseArgs が command を検証済みのため到達不能。1（confirmed指摘あり専用）と
+  // 混同しないよう、フォールバックも例外系の 2 にしておく。
+  return 2;
 }
 
 // SIGINT を受けて協調的キャンセルを行う。1回目は abortController.abort() で実行中の
@@ -360,7 +365,7 @@ async function main(): Promise<void> {
     if (error instanceof UsageError) {
       process.stderr.write(`error: ${error.message}\n\n`);
       process.stderr.write(USAGE);
-      process.exit(1);
+      process.exit(2);
     }
     throw error;
   }
