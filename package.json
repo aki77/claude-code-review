@@ -1,6 +1,6 @@
 {
   "name": "@aki77/claude-code-review",
-  "version": "0.6.3",
+  "version": "0.7.0",
   "type": "module",
   "engines": {
     "node": ">=24.2"
