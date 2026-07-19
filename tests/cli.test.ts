@@ -104,6 +104,27 @@ describe("parseArgs", () => {
     const args = parseArgs(["local"]);
     expect(args.noFailOnFindings).toBe(false);
   });
+
+  it("--crit を真偽フラグとして解釈する（local）", () => {
+    const args = parseArgs(["local", "--crit"]);
+    expect(args.crit).toBe(true);
+  });
+
+  it("--crit を真偽フラグとして解釈する（pr）", () => {
+    const args = parseArgs(["pr", "123", "--crit"]);
+    expect(args.crit).toBe(true);
+  });
+
+  it("--crit 未指定時は crit: false になる", () => {
+    const args = parseArgs(["local"]);
+    expect(args.crit).toBe(false);
+  });
+
+  it("--comment と --crit を併用できる（pr）", () => {
+    const args = parseArgs(["pr", "123", "--comment", "--crit"]);
+    expect(args.comment).toBe(true);
+    expect(args.crit).toBe(true);
+  });
 });
 
 describe("reviewExitCode", () => {

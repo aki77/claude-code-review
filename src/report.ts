@@ -9,6 +9,7 @@ import { SEVERITY_PRIORITY } from "./lib/process-findings.ts";
 import type {
   Category,
   Context,
+  CritComment,
   DebugEntry,
   FinalDoc,
   Issue,
@@ -169,6 +170,16 @@ export function printSummary(
   write: (s: string) => void = (s) => process.stdout.write(s),
 ): void {
   write(`${formatSummary(final, ctx)}\n`);
+}
+
+// --crit 出力: crit 連携用の {file, line, body} 配列を stdout に整形出力する
+// （`crit comment --json` にそのまま渡せる形）。write は printSummary と同じく DI 可能
+// （テスト・パイプ差し替え用）。ファイル出力関数は作らない（`--crit > file` で足りる）。
+export function printCritJson(
+  comments: CritComment[],
+  write: (s: string) => void = (s) => process.stdout.write(s),
+): void {
+  write(`${JSON.stringify(comments, null, 2)}\n`);
 }
 
 // --summary-file 出力用の実行メタ情報。CLI 側（local/pr 両方）で組み立てて渡す軽量オブジェクト。

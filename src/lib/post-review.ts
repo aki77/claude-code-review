@@ -16,9 +16,11 @@ import { lineRange, splitAndNormalize } from "./diff-anchor.ts";
 import { execFileAsync } from "./exec.ts";
 import { normalizeLlmNewlines } from "./sanitize-llm-text.ts";
 import type {
+  CritComment,
   FinalDoc,
   Issue,
   Params,
+  PostReviewComment,
   PostReviewInput,
   RestComment,
   ReviewPayload,
@@ -153,6 +155,21 @@ export function buildSuggestionBody(
   return { ok: true, body };
 }
 
+// 1 コメントの投稿本文を組み立てる純関数（GitHub REST / crit 出力で共通）。
+// リテラル \n を実改行へ正規化し、suggestion があれば機械検証してフェンス結合する。
+// 危険な suggestion は fail-closed で捨てて注記付き本文のみにする（コードを消さない）。
+export function buildCommentBody(
+  issue: Issue,
+  comment: PostReviewComment,
+): string {
+  const normalizedCommentBody = normalizeLlmNewlines(comment.commentBody);
+  if (comment.suggestion == null) return normalizedCommentBody;
+  const r = buildSuggestionBody(issue, comment.suggestion, comment.deleteLines);
+  return r.ok
+    ? `${normalizedCommentBody.trimEnd()}\n\n${r.body}`
+    : withStrippedNote(normalizedCommentBody, r.reason);
+}
+
 // stdin の入力（{summaryBody, comments:[{id,commentBody,suggestion?,deleteLines?}]}）と
 // FINAL（confirmed issue 群）を突き合わせて REST API のリクエストボディへ変換する純粋関数。
 // 不正な入力（未知/重複 id・resolved:false のインライン化・resolved:true confirmed の黙殺・
@@ -206,16 +223,9 @@ export function buildPayload(
       throw new Error(`comments[${i}] の id=${c.id} は commentBody が空です`);
     }
 
-    // suggestion があれば機械検証してフェンス結合。危険なら fail-closed で捨てて文章のみ。
-    const normalizedCommentBody = normalizeLlmNewlines(c.commentBody);
-    let body = normalizedCommentBody;
-    if (c.suggestion != null) {
-      const r = buildSuggestionBody(issue, c.suggestion, c.deleteLines);
-      body = r.ok
-        ? `${normalizedCommentBody.trimEnd()}\n\n${r.body}`
-        : withStrippedNote(normalizedCommentBody, r.reason);
-    }
-    restComments.push(toComment(issue, body));
+    // 本文組み立て（正規化＋suggestion 検証・結合）は buildCommentBody に集約し、
+    // crit 出力（buildCritComments）と共通化する。
+    restComments.push(toComment(issue, buildCommentBody(issue, c)));
   });
 
   // 黙殺防止: インライン投稿可能（resolved:true）な confirmed issue が comments に無いのは
@@ -235,6 +245,32 @@ export function buildPayload(
     body: `${SUMMARY_MARKER}\n\n${normalizeLlmNewlines(input.summaryBody ?? "")}`,
     comments: restComments,
   };
+}
+
+// crit 連携用に PostReviewInput（llmCommentBodies の出力）を {file, line, body} 配列へ
+// 変換する純関数。各コメントを id で FINAL の issue に突き合わせ（buildPayload と同じ
+// issueById パターン）、本文は buildCommentBody で GitHub インラインと同一に組み立てる。
+// line は params が単一行なら数値、複数行なら "start-end" 文字列（crit 準拠）。
+// llmCommentBodies は inlineable（resolved:true）のみ comments に入れるため deferred は
+// 自然に除外されるが、防御的に issue.resolved も確認する。
+export function buildCritComments(
+  input: PostReviewInput,
+  finalDoc: FinalDoc,
+): CritComment[] {
+  const issueById = new Map((finalDoc.issues ?? []).map((i) => [i.id, i]));
+  const result: CritComment[] = [];
+  for (const comment of input.comments) {
+    const issue = issueById.get(comment.id);
+    if (!issue?.resolved || issue.params == null) continue;
+    const [start, end] = lineRange(issue.params);
+    const line = start === end ? end : `${start}-${end}`;
+    result.push({
+      file: issue.path,
+      line,
+      body: buildCommentBody(issue, comment),
+    });
+  }
+  return result;
 }
 
 // step10: 投稿本体（副作用）。純ロジック（buildPayload / buildSuggestionBody）は一切変更せず、

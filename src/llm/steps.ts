@@ -620,28 +620,13 @@ export async function llmVerifyIssues(
 
 // ---- step9: PR コメント本文作成 ------------------------------------------------
 
-export interface CommentBodiesInput {
-  prHeadSha: string;
-  nameWithOwner: string;
-}
-
-// category/severity バッジ（report.ts の formatBadge と共通）とパーマリンクを
-// commentBody 先頭に付与する。行番号/sha を LLM に触らせず TS で機械付与する
-// （設計原則「構造転写はコード」）。
-// 案C: 2行構成。1行目 = 太字バッジ行、2行目 = `<sub>📍 [path:line](permalink)</sub>`。
-// permalink 無し（line=undefined、理論上デッドケース）は防御的に場所行を省略しバッジ行のみ返す。
-function decorateCommentBody(issue: Issue, input: CommentBodiesInput): string {
+// category/severity バッジ（report.ts の formatBadge と共通）を commentBody 先頭に
+// 付与する純関数（設計原則「構造転写はコード」）。バッジ行のみを返し、投稿本文は
+// GitHub インライン / crit 出力で共通化する（パーマリンク行は廃止。GitHub は該当行に
+// 紐づくためリンクは冗長、crit は file/line を別フィールドで持つため不要）。
+function decorateCommentBody(issue: Issue): string {
   const badge = formatBadge(issue, { bold: true });
-  const line =
-    issue.params && "line" in issue.params ? issue.params.line : undefined;
-  const permalink =
-    line !== undefined
-      ? `https://github.com/${input.nameWithOwner}/blob/${input.prHeadSha}/${issue.path}#L${line}`
-      : undefined;
-  const location = permalink
-    ? `\n<sub>📍 [${issue.path}:${line}](${permalink})</sub>`
-    : "";
-  return `${badge}${location}\n\n`;
+  return `${badge}\n\n`;
 }
 
 // issue.sourceFindingIds.length !== 1 の issue は suggestion/deleteLines を剥がす
@@ -674,7 +659,6 @@ function formatDeferredSummary(deferred: Issue[]): string {
 
 export async function llmCommentBodies(
   final: FinalDoc,
-  input: CommentBodiesInput,
   deps: StepDeps = {},
 ): Promise<PostReviewInput> {
   const queryFn = deps.query;
@@ -730,7 +714,7 @@ export async function llmCommentBodies(
     };
     const decorated: PostReviewComment = {
       ...c,
-      commentBody: `${decorateCommentBody(issue, input)}${c.commentBody}`,
+      commentBody: `${decorateCommentBody(issue)}${c.commentBody}`,
     };
     return stripSuggestionIfMerged(issue, decorated);
   });

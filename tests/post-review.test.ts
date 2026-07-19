@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { ExecResult } from "../src/lib/exec.ts";
 import {
+  buildCommentBody,
+  buildCritComments,
   buildPayload,
   buildSuggestionBody,
   postReview,
@@ -436,6 +438,138 @@ describe("post-review", () => {
       { commitId: "x" },
     );
     expect(p.comments).toEqual([]);
+  });
+});
+
+describe("buildCommentBody", () => {
+  it("suggestion 無しは commentBody を正規化してそのまま返す（リテラル \\n → 実改行）", () => {
+    const issue = makeIssue({
+      id: "g1",
+      path: "src/a.js",
+      existingCode: "const x = 1;",
+      resolved: true,
+      sourceFindingIds: ["f1"],
+      params: { line: 10, side: "RIGHT", subjectType: "LINE" },
+    });
+    const body = buildCommentBody(issue, {
+      id: "g1",
+      commentBody: "1行目\\n2行目",
+    });
+    expect(body).toBe("1行目\n2行目");
+  });
+
+  it("行数一致の suggestion は ```suggestion フェンスで結合する", () => {
+    const issue = makeIssue({
+      id: "g1",
+      path: "src/a.js",
+      existingCode: "const x = 1;",
+      resolved: true,
+      sourceFindingIds: ["f1"],
+      params: { line: 10, side: "RIGHT", subjectType: "LINE" },
+    });
+    const body = buildCommentBody(issue, {
+      id: "g1",
+      commentBody: "提案",
+      suggestion: "const x = 2;",
+    });
+    expect(body).toBe("提案\n\n```suggestion\nconst x = 2;\n```");
+  });
+});
+
+describe("buildCritComments", () => {
+  it("単一行 issue は line を数値にし、バッジ付き本文を組み立てる", () => {
+    const final = makeFinalDoc([
+      makeIssue({
+        id: "g1",
+        path: "src/a.js",
+        category: "bug",
+        severity: "high",
+        existingCode: "const x = 1;",
+        resolved: true,
+        sourceFindingIds: ["f1"],
+        params: { line: 10, side: "RIGHT", subjectType: "LINE" },
+      }),
+    ]);
+    const crit = buildCritComments(
+      {
+        summaryBody: "s",
+        comments: [
+          { id: "g1", commentBody: "🐛 **Bug**  🟠 **High**\n\n本文コメント" },
+        ],
+      },
+      final,
+    );
+    expect(crit).toHaveLength(1);
+    expect(crit[0]?.file).toBe("src/a.js");
+    expect(crit[0]?.line).toBe(10);
+    expect(crit[0]?.body).toContain("🐛 **Bug**");
+    expect(crit[0]?.body).toContain("本文コメント");
+  });
+
+  it('複数行 issue は line を "start-end" 文字列にする', () => {
+    const final = makeFinalDoc([
+      makeIssue({
+        id: "g2",
+        path: "src/b.js",
+        existingCode: "# APM dependencies\napm_modules/",
+        resolved: true,
+        sourceFindingIds: ["f2"],
+        params: {
+          startLine: 3,
+          line: 4,
+          startSide: "RIGHT",
+          side: "RIGHT",
+          subjectType: "LINE",
+        },
+      }),
+    ]);
+    const crit = buildCritComments(
+      { summaryBody: "s", comments: [{ id: "g2", commentBody: "本文" }] },
+      final,
+    );
+    expect(crit).toHaveLength(1);
+    expect(crit[0]?.line).toBe("3-4");
+  });
+
+  it("suggestion フェンスを body に結合する", () => {
+    const final = makeFinalDoc([
+      makeIssue({
+        id: "g1",
+        path: "src/a.js",
+        existingCode: "const x = 1;",
+        resolved: true,
+        sourceFindingIds: ["f1"],
+        params: { line: 10, side: "RIGHT", subjectType: "LINE" },
+      }),
+    ]);
+    const crit = buildCritComments(
+      {
+        summaryBody: "s",
+        comments: [
+          { id: "g1", commentBody: "提案", suggestion: "const x = 2;" },
+        ],
+      },
+      final,
+    );
+    expect(crit[0]?.body).toContain("```suggestion\nconst x = 2;\n```");
+  });
+
+  it("resolved:false（params 無し）の issue に対応するコメントは除外する", () => {
+    const final = makeFinalDoc([
+      makeIssue({
+        id: "g3",
+        path: "src/c.js",
+        resolved: false,
+        sourceFindingIds: ["f3"],
+        reason: "不一致",
+      }),
+    ]);
+    // 防御確認: 万一 comments に resolved:false の id が混じっても crit 出力に含めない。
+    const crit = buildCritComments(
+      { summaryBody: "s", comments: [{ id: "g3", commentBody: "本文" }] },
+      final,
+    );
+    expect(crit).toEqual([]);
   });
 });
 

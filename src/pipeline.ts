@@ -17,7 +17,7 @@ import { loadConfigWithSource, type ResolvedConfig } from "./lib/config.ts";
 import { buildDiffArgs } from "./lib/diff-anchor.ts";
 import { execFileAsync } from "./lib/exec.ts";
 import { mergeFindings } from "./lib/merge-findings.ts";
-import { postReview } from "./lib/post-review.ts";
+import { buildCritComments, postReview } from "./lib/post-review.ts";
 import { assertPrHeadMatches } from "./lib/pr-head.ts";
 import {
   fetchPrMeta,
@@ -28,9 +28,11 @@ import { processFindings } from "./lib/process-findings.ts";
 import { makeProgressReporter, type ProgressReporter } from "./lib/progress.ts";
 import type {
   Context,
+  CritComment,
   DebugEntry,
   DebugSink,
   FinalDoc,
+  PostReviewInput,
   ReadFileFn,
 } from "./lib/types.ts";
 import {
@@ -77,6 +79,8 @@ export interface PipelineResult {
   // --debug 有効時のみ非空。--summary-file 出力の <details> 折りたたみに使う
   // （makeDebugSink が stderr 書き出しと同時に蓄積する）。
   debugEntries: DebugEntry[];
+  // --crit（emitCrit）指定時のみ設定。crit 連携用の {file, line, body} 配列。
+  critComments?: CritComment[];
 }
 
 export interface PrReviewResult extends PipelineResult {
@@ -86,6 +90,14 @@ export interface PrReviewResult extends PipelineResult {
 
 // diff の maxBuffer。巨大な diff でも打ち切られないよう大きめに確保する。
 const DIFF_MAX_BUFFER = 256 * 1024 * 1024;
+
+// モデル別コスト集計（costs）から総額 USD を算出する。runReviewCore の本体ステップ分と、
+// その後に走る追加 LLM 呼び出し（--comment/--crit のコメント本文生成）分を同じ costs へ
+// 加算した上で、呼び出し元がこの関数で最終値を再計算する（コメント本文生成のコストが
+// totalCostUsd から漏れないようにする）。
+function sumCostUsd(costs: Record<string, ModelUsage>): number {
+  return Object.values(costs).reduce((sum, m) => sum + m.costUSD, 0);
+}
 
 // 著者意図情報がコミットメッセージから得られない（staged / git log 空）場合の共通フォールバック文言。
 const DIFF_ONLY_AUTHOR_INFO = "diff のみから意図推定してください。";
@@ -103,7 +115,11 @@ async function runReviewCore(
       progress: ProgressReporter;
       abortController?: AbortController;
     },
-): Promise<{ final: FinalDoc; totalCostUsd: number }> {
+): Promise<{
+  final: FinalDoc;
+  costs: Record<string, ModelUsage>;
+  costSink: CostSink;
+}> {
   const { exec, query, readFile, debug, progress, abortController, config } =
     deps;
 
@@ -167,7 +183,7 @@ async function runReviewCore(
     };
     debug("final", emptyFinal);
     debug("cost-summary", { totalCostUsd: 0, byModel: {} });
-    return { final: emptyFinal, totalCostUsd: 0 };
+    return { final: emptyFinal, costs, costSink };
   }
 
   // サマリ + クラスタ分割案。small-PR は summary の LLM 呼び出しを省き、著者意図情報
@@ -253,13 +269,12 @@ async function runReviewCore(
     `confirmed:${final.stats.confirmed} rejected:${final.stats.rejected}`,
   );
   debug("final", final);
-  const totalCostUsd = Object.values(costs).reduce(
-    (sum, m) => sum + m.costUSD,
-    0,
-  );
-  debug("cost-summary", { totalCostUsd, byModel: costs });
+  // ここでの cost-summary は本体ステップ（〜FINAL 生成）分の内訳。--comment/--crit の
+  // コメント本文生成は呼び出し元で同じ costSink 経由 costs に加算され、最終 totalCostUsd は
+  // 呼び出し元が sumCostUsd(costs) で再計算する。
+  debug("cost-summary", { totalCostUsd: sumCostUsd(costs), byModel: costs });
 
-  return { final, totalCostUsd };
+  return { final, costs, costSink };
 }
 
 // --background（インライン）と --background-file（ファイル）を結合し、authorInfo に
@@ -314,6 +329,22 @@ function resolveConfigWithDebug(
   return config;
 }
 
+// --comment 投稿・--crit 出力が共通で使う投稿本文（llmCommentBodies の出力）を生成する。
+// LLM を呼ぶのはこの1箇所だけにし、local/pr 双方・両オプション併用でも二重呼び出しを避ける
+// （呼び出し元は返り値の postInput を postReview と buildCritComments に使い回す）。
+// debug 出力と progress の進行もここに集約し、local/pr で挙動が乖離しないようにする。
+async function generatePostInput(
+  final: FinalDoc,
+  stepDeps: NonNullable<Parameters<typeof llmCommentBodies>[1]>,
+): Promise<PostReviewInput> {
+  const postInput = await llmCommentBodies(final, stepDeps);
+  stepDeps.debug?.("postInput", postInput);
+  if (final.issues.some((i) => i.resolved)) {
+    stepDeps.progress?.succeedStep();
+  }
+  return postInput;
+}
+
 export async function runLocalReview(
   opts: CollectContextOpts,
   runOpts: {
@@ -321,6 +352,7 @@ export async function runLocalReview(
     quiet?: boolean;
     background?: string;
     backgroundFile?: string;
+    emitCrit?: boolean;
     abortController?: AbortController;
   },
   deps: PipelineDeps = {},
@@ -375,9 +407,31 @@ export async function runLocalReview(
       abortController: runOpts.abortController,
       config,
     });
-    totalCostUsd = result.totalCostUsd;
+    // --crit 指定時のみ、投稿用と同一の本文（llmCommentBodies）を生成して crit 形式へ
+    // 変換する（追加 LLM コストが発生する意図的判断）。本体と同じ costSink を渡し、
+    // コメント本文生成分も costs に加算する（漏れなく totalCostUsd へ反映する）。
+    let critComments: CritComment[] | undefined;
+    if (runOpts.emitCrit) {
+      const postInput = await generatePostInput(result.final, {
+        query,
+        debug,
+        progress,
+        costSink: result.costSink,
+        abortController: runOpts.abortController,
+        config,
+      });
+      critComments = buildCritComments(postInput, result.final);
+    }
+    // 本体＋コメント本文生成の総額。generatePostInput 実行後に再計算する。
+    totalCostUsd = sumCostUsd(result.costs);
 
-    return { final: result.final, ctx, totalCostUsd, debugEntries };
+    return {
+      final: result.final,
+      ctx,
+      totalCostUsd,
+      debugEntries,
+      critComments,
+    };
   } finally {
     dispose();
     progress.done();
@@ -393,6 +447,7 @@ export async function runPrReview(
     quiet?: boolean;
     background?: string;
     backgroundFile?: string;
+    emitCrit?: boolean;
     abortController?: AbortController;
   },
   deps: PipelineDeps = {},
@@ -449,45 +504,40 @@ export async function runPrReview(
       abortController: runOpts.abortController,
       config,
     });
-    totalCostUsd = result.totalCostUsd;
     const { final } = result;
 
-    if (!runOpts.comment) {
-      return {
-        final,
-        ctx,
-        headRefOid: meta.headRefOid,
-        totalCostUsd,
-        debugEntries,
-      };
-    }
-
-    const nameWithOwner = await getNameWithOwner({ exec: boundExec });
-    const postInput = await llmCommentBodies(
-      final,
-      { prHeadSha: meta.headRefOid, nameWithOwner },
-      {
+    // 投稿本文（llmCommentBodies）は comment 投稿・crit 出力の双方が使う。両方指定でも
+    // LLM を二重に呼ばないよう、生成は generatePostInput の1回だけにして使い回す。
+    // いずれも不要なら本文生成（LLM 呼び出し）自体を行わない。本体と同じ costSink を渡し、
+    // コメント本文生成分も costs に加算する。
+    let critComments: CritComment[] | undefined;
+    let postedUrl: string | undefined;
+    if (runOpts.comment || runOpts.emitCrit) {
+      const postInput = await generatePostInput(final, {
         query,
         debug,
         progress,
+        costSink: result.costSink,
         abortController: runOpts.abortController,
         config,
-      },
-    );
-    debug("postInput", postInput);
-    if (final.issues.filter((i) => i.resolved).length > 0) {
-      progress.succeedStep();
+      });
+      if (runOpts.emitCrit) critComments = buildCritComments(postInput, final);
+      if (runOpts.comment) {
+        const nameWithOwner = await getNameWithOwner({ exec: boundExec });
+        progress.startStep("投稿");
+        postedUrl = await postReview({
+          pr,
+          nameWithOwner,
+          postInput,
+          final,
+          commitId: meta.headRefOid,
+          exec: boundExec,
+        });
+        progress.succeedStep();
+      }
     }
-    progress.startStep("投稿");
-    const postedUrl = await postReview({
-      pr,
-      nameWithOwner,
-      postInput,
-      final,
-      commitId: meta.headRefOid,
-      exec: boundExec,
-    });
-    progress.succeedStep();
+    // 本体＋コメント本文生成の総額。generatePostInput 実行後に再計算する。
+    totalCostUsd = sumCostUsd(result.costs);
 
     return {
       final,
@@ -496,6 +546,7 @@ export async function runPrReview(
       headRefOid: meta.headRefOid,
       totalCostUsd,
       debugEntries,
+      critComments,
     };
   } finally {
     dispose();

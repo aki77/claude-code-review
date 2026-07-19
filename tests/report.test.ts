@@ -2,11 +2,17 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Context, FinalDoc, Issue } from "../src/lib/types.ts";
+import type {
+  Context,
+  CritComment,
+  FinalDoc,
+  Issue,
+} from "../src/lib/types.ts";
 import {
   formatDebugMarkdown,
   formatSummary,
   formatSummaryMarkdown,
+  printCritJson,
   writeSummaryFile,
 } from "../src/report.ts";
 
@@ -253,6 +259,31 @@ describe("formatDebugMarkdown", () => {
     // 開始・終了フェンスの数だけ出現する（内容側の```は3連続のまま素通し）。
     const fenceMatches = out.match(/````+/g) ?? [];
     expect(fenceMatches.length).toBe(2);
+  });
+});
+
+describe("printCritJson", () => {
+  it("write DI で crit コメント配列を整形 JSON（末尾改行付き）で出力する", () => {
+    const comments: CritComment[] = [
+      { file: "src/a.ts", line: 42, body: "本文A" },
+      { file: "src/a.ts", line: "50-55", body: "本文B" },
+    ];
+    let out = "";
+    printCritJson(comments, (s) => {
+      out += s;
+    });
+    expect(out).toBe(`${JSON.stringify(comments, null, 2)}\n`);
+    // パースし直しても同じ配列になる（valid JSON）。
+    expect(JSON.parse(out)).toEqual(comments);
+  });
+
+  it("空配列でも valid JSON（[]）を出力する", () => {
+    let out = "";
+    printCritJson([], (s) => {
+      out += s;
+    });
+    expect(out).toBe("[]\n");
+    expect(JSON.parse(out)).toEqual([]);
   });
 });
 

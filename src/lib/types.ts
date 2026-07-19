@@ -250,6 +250,16 @@ export interface PostReviewInput {
   comments: PostReviewComment[];
 }
 
+/**
+ * crit 連携用の 1 コメント。`crit comment --json` がそのまま受け取れる
+ * `{file, line, body}` 形式。line は単一行なら数値、複数行なら "start-end" 文字列。
+ */
+export interface CritComment {
+  file: string;
+  line: number | string;
+  body: string;
+}
+
 /** REST PR レビューコメント（buildPayload の出力要素）。 */
 export interface RestComment {
   path: string;

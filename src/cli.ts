@@ -13,7 +13,7 @@
  */
 import { elapsedMs, isAbortError } from "./lib/abort.ts";
 import { runLocalReview, runPrReview } from "./pipeline.ts";
-import { printSummary, writeSummaryFile } from "./report.ts";
+import { printCritJson, printSummary, writeSummaryFile } from "./report.ts";
 
 type Command = "local" | "pr";
 
@@ -22,6 +22,7 @@ export type ParsedArgs = {
   prNumber?: number;
   range?: string | true;
   comment: boolean;
+  crit: boolean;
   debug: boolean;
   quiet: boolean;
   help: boolean;
@@ -32,8 +33,8 @@ export type ParsedArgs = {
 };
 
 const USAGE = `Usage:
-  code-review local [--range [<range>]] [--background <text>] [--background-file <path>] [--summary-file <path>] [--no-fail-on-findings] [--debug] [--quiet]
-  code-review pr <number> [--comment] [--background <text>] [--background-file <path>] [--summary-file <path>] [--no-fail-on-findings] [--debug] [--quiet]
+  code-review local [--range [<range>]] [--crit] [--background <text>] [--background-file <path>] [--summary-file <path>] [--no-fail-on-findings] [--debug] [--quiet]
+  code-review pr <number> [--comment] [--crit] [--background <text>] [--background-file <path>] [--summary-file <path>] [--no-fail-on-findings] [--debug] [--quiet]
   code-review --help
 
 Commands:
@@ -44,6 +45,9 @@ Options:
   --range [<range>]             local 専用。差分範囲を指定（省略時は作業ツリーの未コミット
                                  変更全体＝staged+unstaged+untracked をレビュー）
   --comment                     pr 専用。レビュー結果を PR にインラインコメントとして投稿する
+  --crit                        local/pr 共通。crit 連携用に {file, line, body} の JSON 配列を
+                                 stdout に出力する（\`crit comment --json\` にそのまま渡せる）。
+                                 printSummary / posted: 行は抑制する（進捗は stderr）
   --background, -b <text>       自動取得できない背景情報（要件・意図）をインラインで指定する
   --background-file, -B <path>  背景情報をファイルから読み込む（8000字上限・サニタイズ適用）
   --summary-file <path>         レビュー結果＋実行メタを Markdown で指定パスに追記する
@@ -85,6 +89,7 @@ function consumeRequiredValue(
 export function parseArgs(argv: string[]): ParsedArgs {
   let help = false;
   let comment = false;
+  let crit = false;
   let debug = false;
   let quiet = false;
   let range: string | true | undefined;
@@ -114,6 +119,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
     if (token === "--comment") {
       comment = true;
+      i += 1;
+      continue;
+    }
+
+    if (token === "--crit") {
+      crit = true;
       i += 1;
       continue;
     }
@@ -207,6 +218,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       command: command ?? "local",
       help,
       comment,
+      crit,
       debug,
       quiet,
       range,
@@ -230,6 +242,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     prNumber,
     range,
     comment,
+    crit,
     debug,
     quiet,
     help,
@@ -290,17 +303,24 @@ async function dispatch(
     // staged+unstaged+untracked を一時 index 経由の統一 diff としてレビューする）。
     const rangeOpt = args.range === true ? undefined : args.range;
     try {
-      const { final, ctx, totalCostUsd, debugEntries } = await runLocalReview(
-        { mode: "range", range: rangeOpt },
-        {
-          debug: args.debug,
-          quiet: args.quiet,
-          background: args.background,
-          backgroundFile: args.backgroundFile,
-          abortController,
-        },
-      );
-      printSummary(final, ctx);
+      const { final, ctx, totalCostUsd, debugEntries, critComments } =
+        await runLocalReview(
+          { mode: "range", range: rangeOpt },
+          {
+            debug: args.debug,
+            quiet: args.quiet,
+            background: args.background,
+            backgroundFile: args.backgroundFile,
+            emitCrit: args.crit,
+            abortController,
+          },
+        );
+      // --crit 時は stdout を crit JSON のみにする（printSummary は抑制。進捗は stderr）。
+      if (args.crit) {
+        printCritJson(critComments ?? []);
+      } else {
+        printSummary(final, ctx);
+      }
       maybeWriteSummaryFile(args, final, ctx, { totalCostUsd }, debugEntries);
       return reviewExitCode(final.stats.confirmed, args.noFailOnFindings);
     } catch (error) {
@@ -310,17 +330,30 @@ async function dispatch(
 
   if (args.command === "pr") {
     try {
-      const { final, ctx, postedUrl, headRefOid, totalCostUsd, debugEntries } =
-        await runPrReview(String(args.prNumber), {
-          debug: args.debug,
-          comment: args.comment,
-          quiet: args.quiet,
-          background: args.background,
-          backgroundFile: args.backgroundFile,
-          abortController,
-        });
-      printSummary(final, ctx);
-      if (postedUrl) process.stdout.write(`posted: ${postedUrl}\n`);
+      const {
+        final,
+        ctx,
+        postedUrl,
+        headRefOid,
+        totalCostUsd,
+        debugEntries,
+        critComments,
+      } = await runPrReview(String(args.prNumber), {
+        debug: args.debug,
+        comment: args.comment,
+        quiet: args.quiet,
+        background: args.background,
+        backgroundFile: args.backgroundFile,
+        emitCrit: args.crit,
+        abortController,
+      });
+      // --crit 時は stdout を crit JSON のみにする（printSummary / posted: 行は抑制）。
+      if (args.crit) {
+        printCritJson(critComments ?? []);
+      } else {
+        printSummary(final, ctx);
+        if (postedUrl) process.stdout.write(`posted: ${postedUrl}\n`);
+      }
       maybeWriteSummaryFile(
         args,
         final,
