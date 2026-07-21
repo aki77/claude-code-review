@@ -30,7 +30,7 @@ import type {
   ReadFileFn,
   Verdict,
 } from "../lib/types.ts";
-import { formatBadge } from "../report.ts";
+import { formatBadge, prefixToolHeader } from "../report.ts";
 import {
   type QueryFn,
   type RunStructuredResult,
@@ -626,7 +626,7 @@ export async function llmVerifyIssues(
 // 紐づくためリンクは冗長、crit は file/line を別フィールドで持つため不要）。
 function decorateCommentBody(issue: Issue): string {
   const badge = formatBadge(issue, { bold: true });
-  return `${badge}\n\n`;
+  return `${prefixToolHeader(badge)}\n\n`;
 }
 
 // issue.sourceFindingIds.length !== 1 の issue は suggestion/deleteLines を剥がす

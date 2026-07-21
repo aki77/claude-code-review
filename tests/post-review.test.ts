@@ -6,9 +6,9 @@ import {
   buildPayload,
   buildSuggestionBody,
   postReview,
-  SUMMARY_MARKER,
 } from "../src/lib/post-review.ts";
 import type { FinalDoc, Issue } from "../src/lib/types.ts";
+import { TOOL_HEADER } from "../src/report.ts";
 
 // テストで変化しない共通フィールドを既定値にし、各ケースは差分（id/path/existingCode/
 // resolved/params/sourceFindingIds 等）だけ渡せばよいようにするビルダー。
@@ -94,7 +94,7 @@ describe("post-review", () => {
     );
     expect(p.commit_id).toBe("abc123");
     expect(p.event).toBe("COMMENT");
-    expect(p.body).toBe(`${SUMMARY_MARKER}\n\n## サマリ`);
+    expect(p.body).toBe(`${TOOL_HEADER}\n\n## サマリ`);
     expect(p.comments.length).toBe(2);
   });
 
@@ -110,7 +110,7 @@ describe("post-review", () => {
       makeBaseFinalDoc(),
       { commitId: "abc123" },
     );
-    expect(p.body).toBe(`${SUMMARY_MARKER}\n\nサマリ1行目\nサマリ2行目`);
+    expect(p.body).toBe(`${TOOL_HEADER}\n\nサマリ1行目\nサマリ2行目`);
     expect(p.comments.find((c) => c.path === "src/a.js")!.body).toBe(
       "本文1行目\n本文2行目",
     );
@@ -133,12 +133,12 @@ describe("post-review", () => {
     );
   });
 
-  it("buildPayload: summaryBody 先頭に SUMMARY_MARKER が付く（未指定でもマーカー行は入る）", () => {
+  it("buildPayload: summaryBody 先頭に TOOL_HEADER が付く（未指定でもヘッダ行は入る）", () => {
     const p = buildPayload({ comments: [] }, makeFinalDoc([]), {
       commitId: "abc123",
     });
-    expect(p.body).toBe(`${SUMMARY_MARKER}\n\n`);
-    expect(p.body.startsWith(SUMMARY_MARKER)).toBe(true);
+    expect(p.body).toBe(`${TOOL_HEADER}\n\n`);
+    expect(p.body.startsWith(TOOL_HEADER)).toBe(true);
   });
 
   it("toComment: 単一行は line+side のみ、start_*/subjectType を含めない", () => {
@@ -427,7 +427,7 @@ describe("post-review", () => {
       { commitId: "x" },
     );
     expect(p.comments).toEqual([]);
-    expect(p.body).toBe(`${SUMMARY_MARKER}\n\n問題は見つかりませんでした。`);
+    expect(p.body).toBe(`${TOOL_HEADER}\n\n問題は見つかりませんでした。`);
   });
 
   it("許容: confirmed 0 件（FINAL 空）ならサマリのみ投稿", () => {

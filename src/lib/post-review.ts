@@ -12,6 +12,8 @@
 // フェンスを書かせず「置換後の行だけ」を渡させ、この関数が FINAL の existingCode（＝範囲の
 // 逐語テキスト）と突き合わせて「意図しない行削除」を機械検出する。検出したら suggestion を捨てて
 // 文章コメントのみ投稿する（コードは絶対に消さない・レビュー全体は止めない）。
+
+import { prefixToolHeader } from "../report.ts";
 import { lineRange, splitAndNormalize } from "./diff-anchor.ts";
 import { execFileAsync } from "./exec.ts";
 import { normalizeLlmNewlines } from "./sanitize-llm-text.ts";
@@ -27,12 +29,6 @@ import type {
 } from "./types.ts";
 
 type Exec = typeof execFileAsync;
-
-// サマリーコメント本文の先頭に付与する固定マーカー。PR 上ではレンダリングされない
-// HTML コメントで、本文の部分文字列マッチによって当ツールのサマリーコメントを
-// 他のコメントと区別できるようにする（例: 古いサマリーコメントの一括削除）。
-// 固定文字列のみ（環境変数化はしない）。
-export const SUMMARY_MARKER = "<!-- claude-code-review -->";
 
 // params を GitHub REST の snake_case へ変換する。単一行は line+side のみ、
 // 複数行は start_line/start_side も含める。subjectType は落とす。
@@ -242,7 +238,7 @@ export function buildPayload(
   return {
     commit_id: commitId,
     event: "COMMENT",
-    body: `${SUMMARY_MARKER}\n\n${normalizeLlmNewlines(input.summaryBody ?? "")}`,
+    body: prefixToolHeader(normalizeLlmNewlines(input.summaryBody ?? "")),
     comments: restComments,
   };
 }

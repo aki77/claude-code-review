@@ -36,6 +36,18 @@ export interface BadgeStyle {
   bold: boolean;
 }
 
+// 当ツール投稿と一目で分かる可視ヘッダ。削除ツールはこのラベル文字列を識別子に使う。
+export const TOOL_LABEL = "Claude Code Review";
+const TOOL_LOGO_URL =
+  "https://raw.githubusercontent.com/aki77/claude-code-review/main/assets/claude-logo.svg";
+export const TOOL_HEADER = `![Claude](${TOOL_LOGO_URL}) **${TOOL_LABEL}**`;
+
+// body の先頭に可視ヘッダを空行区切りで前置する。サマリ本文（post-review.ts）と
+// インライン本文（steps.ts）の双方が使う唯一の連結定義（formatBadge と同じく共通化）。
+export function prefixToolHeader(body: string): string {
+  return `${TOOL_HEADER}\n\n${body}`;
+}
+
 // カテゴリ・重要度の絵文字バッジ行を組み立てる。report.ts のサマリ出力・llm/steps.ts の
 // PR コメント本文（バッジ・欠落時のサマリ言及）で共通して使う唯一の定義。
 // style.bold=true で PR Markdown 向けの太字ラベルにする（デフォルトは安全側のプレーン）。

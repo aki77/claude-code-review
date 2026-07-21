@@ -16,6 +16,7 @@ import {
   llmVerifyIssues,
   retryUnresolvedAnchors,
 } from "../src/llm/steps.ts";
+import { TOOL_HEADER } from "../src/report.ts";
 import {
   makeAbortingQuery,
   makeFakeQuery,
@@ -689,8 +690,10 @@ describe("llmCommentBodies", () => {
     expect(c?.commentBody).not.toContain("<sub>📍");
     expect(c?.commentBody).not.toContain("https://github.com/");
     expect(c?.commentBody).toContain("本文コメント");
-    // バッジ行の直後に本文が続く（バッジ\n\n本文）。
-    expect(c?.commentBody).toBe("🐛 **Bug**  🟠 **High**\n\n本文コメント");
+    // TOOL_HEADER → バッジ行 → 本文の順で連結される。
+    expect(c?.commentBody).toBe(
+      `${TOOL_HEADER}\n\n🐛 **Bug**  🟠 **High**\n\n本文コメント`,
+    );
   });
 
   it("resolved:false は comments から除外され summaryBody に回る", async () => {
