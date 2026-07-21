@@ -1,7 +1,6 @@
 ---
 name: claude-code-review
-description: 作業ツリーの未コミット変更（無ければ base ブランチとの差分）をレビューする（local 専用）。ブランチ名を渡すとそのブランチとの差分をレビューする。`--fix` を付けると指摘が 0 件になるまで修正を繰り返す。`--crit` を付けるとレビュー結果を crit に流し込んでインラインレビューを開く。
-disable-model-invocation: true
+description: "/claude-code-review で明示的に呼ばれたとき、または他スキルがこのスキル名を指定して委譲したときにのみ使う。通常のコードレビュー依頼では発火しない。"
 argument-hint: "[branch] [--fix] [--crit]"
 ---
 
